@@ -6,7 +6,7 @@ import { Card } from '@/components/ui/card'
 import { PageHeader } from '@/components/PageHeader'
 import { TierBadge } from '@/components/TierBadge'
 import { money, shortAddr, period, type Tier } from '@/lib/format'
-import { API_BASE } from '@/lib/aleo'
+import { API_BASE, PROGRAM } from '@/lib/aleo'
 import { fetchTokenInfo, fromBase } from '@/lib/units'
 
 type Result = {
@@ -26,7 +26,7 @@ async function fetchProveResult(txId: string): Promise<Omit<Result, 'threshold' 
   if (!res.ok) return null
   const tx = await res.json()
   const transitions = tx?.execution?.transitions ?? []
-  const t = transitions.find((x: { program?: string; function?: string }) => x.program === 'sealary_pay.aleo' && x.function === 'prove_income')
+  const t = transitions.find((x: { program?: string; function?: string }) => x.program === PROGRAM && x.function === 'prove_income')
   if (!t) return null
   // 公开输出顺序：tier(u8), employer(address), token_id(field), period(u32)
   const pub = (t.outputs ?? []).filter((o: { type?: string }) => o.type === 'public').map((o: { value?: string }) => o.value)

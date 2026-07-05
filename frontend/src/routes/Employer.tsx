@@ -13,7 +13,7 @@ import { SealedAmount } from '@/components/SealedAmount'
 import { ConnectButton } from '@/components/ConnectButton'
 import { Card } from '@/components/ui/card'
 import { shortAddr, money, period } from '@/lib/format'
-import { payOpts, setSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM } from '@/lib/aleo'
+import { payBatchOpts, PAY_BATCH, setSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM } from '@/lib/aleo'
 import { toBase, fromBase } from '@/lib/units'
 import { getCompany, listEmployees, addEmployee, type Company, type Person } from '@/lib/api'
 
@@ -113,7 +113,7 @@ export function Employer() {
       </Gate>
     )
   }
-  return <Console company={company} executeTransaction={executeTransaction} requestRecords={requestRecords} />
+  return <Console company={company} address={address} executeTransaction={executeTransaction} requestRecords={requestRecords} />
 }
 
 function Gate({ icon, text, children }: { icon: React.ReactNode; text: string; children: React.ReactNode }) {
@@ -126,8 +126,8 @@ function Gate({ icon, text, children }: { icon: React.ReactNode; text: string; c
   )
 }
 
-function Console({ company, executeTransaction, requestRecords }: {
-  company: Company
+function Console({ company, address, executeTransaction, requestRecords }: {
+  company: Company; address: string
   executeTransaction: Wallet['executeTransaction']; requestRecords: Wallet['requestRecords']
 }) {
   const [roster, setRoster] = useState<Person[]>([])
@@ -151,10 +151,11 @@ function Console({ company, executeTransaction, requestRecords }: {
 
   const pending = useMemo(() => roster.filter((e) => !paidIds.has(e.id)), [roster, paidIds])
   // 可发薪 = 未付 + 地址合法 + 链上已有薪资配置（否则不知道发多少）。
-  const payTarget = useMemo(
-    () => pending.find((e) => isAleoAddr(e.walletAddress) && salaries[e.walletAddress] != null),
+  const payable = useMemo(
+    () => pending.filter((e) => isAleoAddr(e.walletAddress) && salaries[e.walletAddress] != null),
     [pending, salaries],
   )
+  const batchN = Math.min(payable.length, PAY_BATCH) // 本批一笔发多少人
   const sum = (list: Person[]) => list.reduce((s, e) => s + (salaryOf(e) ?? 0), 0)
   const payrollTotal = sum(roster)
   const pendingTotal = sum(pending)
@@ -164,9 +165,10 @@ function Console({ company, executeTransaction, requestRecords }: {
     fetchSalaries(requestRecords).then(setSalaries).catch(() => {})
   }
 
+  // 一笔 pay_batch 发本批最多 4 人（薪资取自链上 SalaryConfig，已是 base units）。
   async function runBatch() {
-    const next = payTarget
-    if (!next) {
+    const targets = payable.slice(0, PAY_BATCH)
+    if (targets.length === 0) {
       toast.error('No payable employee', { description: 'Add an employee (with a real address + salary) first.' })
       return
     }
@@ -177,11 +179,17 @@ function Console({ company, executeTransaction, requestRecords }: {
         toast.error('No payroll Token record', { description: `Mint ${company.symbol} to this wallet first (bootstrap.sh).` })
         return
       }
-      // 薪资取自链上 SalaryConfig（已是 base units），直接付。
-      const res = await executeTransaction(payOpts(uid, next.walletAddress, salaries[next.walletAddress], CURRENT_PERIOD))
-      setPaidIds((s) => new Set(s).add(next.id))
-      toast.success(`Sealed pay → ${next.name}`, {
-        description: (res?.transactionId ?? 'submitted') + (pending.length > 1 ? ' · run again for the next（链式发薪）' : ''),
+      // 补位到 4：多余槽用雇主自己地址 + amount 0（雇主拿到 0 额 Paystub，无害；不污染员工）。
+      const tos = Array.from({ length: PAY_BATCH }, (_, i) => targets[i]?.walletAddress ?? address)
+      const amounts = Array.from({ length: PAY_BATCH }, (_, i) => (targets[i] ? salaries[targets[i].walletAddress] : 0n))
+      const res = await executeTransaction(payBatchOpts(uid, tos, amounts, CURRENT_PERIOD))
+      setPaidIds((s) => {
+        const n = new Set(s)
+        targets.forEach((t) => n.add(t.id))
+        return n
+      })
+      toast.success(`Sealed pay → ${targets.length} employee${targets.length > 1 ? 's' : ''}`, {
+        description: (res?.transactionId ?? 'submitted') + (payable.length > targets.length ? ' · run again for the next batch' : ''),
       })
     } catch (e) {
       toast.error('Pay failed', { description: String((e as Error)?.message ?? e) })
@@ -241,7 +249,7 @@ function Console({ company, executeTransaction, requestRecords }: {
               {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               {reveal ? 'Seal' : 'Reveal'}
             </Button>
-            <RunBatchDialog count={pending.length} total={pendingTotal} reveal={reveal} onConfirm={runBatch} busy={busy} nextName={payTarget?.name} token={company.symbol} />
+            <RunBatchDialog batchN={batchN} payableN={payable.length} total={pendingTotal} reveal={reveal} onConfirm={runBatch} busy={busy} token={company.symbol} />
           </div>
         </div>
 
@@ -292,28 +300,28 @@ function Console({ company, executeTransaction, requestRecords }: {
 }
 
 function RunBatchDialog(
-  { count, total, reveal, onConfirm, busy, nextName, token }:
-  { count: number; total: number; reveal: boolean; onConfirm: () => void | Promise<void>; busy: boolean; nextName?: string; token: string },
+  { batchN, payableN, total, reveal, onConfirm, busy, token }:
+  { batchN: number; payableN: number; total: number; reveal: boolean; onConfirm: () => void | Promise<void>; busy: boolean; token: string },
 ) {
   const [open, setOpen] = useState(false)
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="rounded-full" disabled={count === 0}>
-          <Send className="size-4" /> Pay next{nextName ? ` · ${nextName}` : ''} {count > 0 && `(${count})`}
+        <Button className="rounded-full" disabled={batchN === 0}>
+          <Send className="size-4" /> Pay batch {batchN > 0 && `(${batchN})`}
         </Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle className="font-heading text-xl">Seal & send one payslip</DialogTitle>
+          <DialogTitle className="font-heading text-xl">Seal & send payroll</DialogTitle>
           <DialogDescription>
-            One private transfer to {nextName ?? 'the next employee'}, minting a Paystub bound to the same amount.
-            Chained: the change record funds the next pay.
+            Pay {batchN} employee{batchN > 1 ? 's' : ''} in one sealed transaction — {batchN} private transfers + {batchN} Paystubs, a single approval, no per-pay wait.
+            {payableN > batchN ? ` ${payableN - batchN} more follow in the next batch.` : ''}
           </DialogDescription>
         </DialogHeader>
         <div className="rounded-lg border border-border bg-secondary/40 p-4 text-sm">
-          <Row k="Recipient" v={`${nextName ?? '1 employee'} (1 of ${count})`} />
-          <Row k="Remaining total" v={reveal ? `${money(total)} ${token}` : `•••••• ${token}`} />
+          <Row k="This batch" v={`${batchN} of ${payableN} payable`} />
+          <Row k="Pending total" v={reveal ? `${money(total)} ${token}` : `•••••• ${token}`} />
           <Row k="Public state" v="0 amounts revealed" mono />
         </div>
         <DialogFooter>

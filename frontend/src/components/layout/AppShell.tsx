@@ -62,7 +62,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="mx-auto flex max-w-6xl flex-col items-start gap-1 px-5 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <span className="font-heading text-base text-foreground">Sealed salary, provable income.</span>
           <span className="font-mono text-xs">
-            built on Aleo · sealary_pay.aleo · testnet
+            built on Aleo · sealary_payroll.aleo · testnet
           </span>
         </div>
       </footer>

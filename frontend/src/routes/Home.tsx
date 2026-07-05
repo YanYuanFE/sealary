@@ -82,7 +82,7 @@ export function Home() {
                 </div>
                 <div className="mt-6 grid gap-3 font-mono text-xs text-muted-foreground sm:grid-cols-2">
                   <span>owner {shortAddr('aleo1z62rhxmej9ldd9hf76xa6r5p2dm4fgvsxv90p728mrgzm4ywz5fqezlww8')}</span>
-                  <span>program sealary_pay.aleo</span>
+                  <span>program sealary_payroll.aleo</span>
                   <span>token zUSD</span>
                   <span>record encrypted</span>
                 </div>

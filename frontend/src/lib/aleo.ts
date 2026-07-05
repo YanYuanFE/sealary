@@ -3,7 +3,7 @@ import { DecryptPermission } from '@provablehq/aleo-wallet-adaptor-core'
 
 // ── 链上配置 ──────────────────────────────────────────────
 export const NETWORK = Network.TESTNET
-export const PROGRAM = 'sealary_pay.aleo'
+export const PROGRAM = 'sealary_payroll.aleo' // pay + pay_batch + prove_income + disclose + tier
 export const HR_PROGRAM = 'sealary_conf.aleo' // 雇主私有薪资配置（加密 record，后端不存薪资）
 export const DECRYPT = DecryptPermission.UponRequest
 export const CONNECT_PROGRAMS = [PROGRAM, HR_PROGRAM, 'token_registry.aleo']
@@ -71,6 +71,23 @@ export function payOpts(tokenUid: string, to: string, amount: number | bigint, p
       { type: 'record', program: 'token_registry.aleo', recordname: 'Token', uid: tokenUid },
       to,
       `${amount}u128`,
+      `${period}u32`,
+    ],
+    fee: FEE,
+  }
+}
+
+// pay_batch(input Token, tos: [address;4], amounts: [u128;4], period) —— 一笔 tx 发 4 人，
+// 链式复用找零、免"等找零 finalize"串行。tos/amounts 必须正好 4 项（调用方补位：多余槽 amount 0）。
+export const PAY_BATCH = 4
+export function payBatchOpts(tokenUid: string, tos: string[], amounts: bigint[], period: number): TransactionOptions {
+  return {
+    program: PROGRAM,
+    function: 'pay_batch',
+    inputs: [
+      { type: 'record', program: 'token_registry.aleo', recordname: 'Token', uid: tokenUid },
+      `[${tos.join(', ')}]`,
+      `[${amounts.map((a) => `${a}u128`).join(', ')}]`,
       `${period}u32`,
     ],
     fee: FEE,

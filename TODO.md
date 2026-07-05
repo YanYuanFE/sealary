@@ -50,7 +50,7 @@
 - [x] CSV 批量导入员工（`name,address,salary` 每行）：身份后端批量加、薪资走 `set_salary_batch`（8 人一笔），带进度 + 无效行跳过。解析器自检 5/5
 - [~] 空态/错误态：未连钱包/未建组织/无 Paystub/token 校验失败 已覆盖；交易失败 toast 已覆盖
 - [ ] Employer 「发行薪资币」UI（可选，把 bootstrap 的 register_token/mint 搬进前端；当前用脚本）
-- [~] **批量发薪 `pay_batch`**（K=4：一笔发 4 人，链式复用找零，免"等找零 finalize"串行）：合约已写入 `contract/sealary/src/main.leo` 并编译验证（4 调用/10 输出在上限内）。**待重部署**（sealary_pay @noupgrade → 需改名 + credits）+ CLI 真机验（chaining 的 finalize 对 ext_auth=false 应良性，需实测确认）+ 前端接线。**当前余额不足，等 faucet**
+- [x] **批量发薪 `pay_batch`**（K=4：一笔发 4 人，链式复用找零，免"等找零 finalize"串行）：payroll 程序改名 `sealary_payroll.aleo` 重部署（tx `at16l6g8w…`）；**链上实测 pay_batch 发 4 人成功**（tx `at1ys6t6py…`，费 0.024）——验证了链式 finalize 警告对 ext_auth=false 良性（transfer_private 的 finalize 只断言不变量、不碰状态）；前端 PROGRAM 切新名 + `payBatchOpts`，发薪按 ≤4 人一批（Verify 页程序名同步）
 - [ ] 交易状态轮询（pending/finalized）+ 成功后刷新 records（现为乐观更新）
 
 ## P1 · 后端与合规（TECH_DESIGN §15；脚手架已落 `frontend/api/`（与前端同项目），见 BACKEND_PLAN）
@@ -90,3 +90,5 @@
 - 装 leo 需 rustc ≥ 1.96
 - 程序名改 `sealary` → `sealary_pay`：Aleo 命名空间费按名长收 `~10^(10−len)` credits，`sealary`(7)=1000 credits 部署不起；≥10 字符降到 1 credit。程序 ID 全量改（合约/前端 PROGRAM/文档），目录仍叫 `contract/sealary`
 - 部署账户地址 `aleo1z62rhxmej9ldd9hf76xa6r5p2dm4fgvsxv90p728mrgzm4ywz5fqezlww8`（= 雇主 = zUSD admin）。私钥在 `contract/sealary/.env`（已 gitignore，勿提交）
+- payroll 程序为加 `pay_batch` 从 `sealary_pay.aleo` → **`sealary_payroll.aleo`** 重部署（Aleo @noupgrade 不可原地升级，只能换名）。旧 `sealary_pay.aleo` 弃用；薪资配置程序 `sealary_hr` → `sealary_conf`（同因加 batch）。前端 PROGRAM/HR_PROGRAM 已切新名，旧程序的 Paystub 需 re-pay 重造
+- Aleo 不能链式喂 async 外部调用的输出（tainted-value 警告），但若被调函数的 finalize 只读不变量（如 transfer_private 只断言 ext_auth/authorized_until），链式仍成立——已链上实测 pay_batch 通过

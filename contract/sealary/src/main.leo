@@ -19,7 +19,7 @@ fn tier_of(amount: u128, threshold: u128) -> u8 {
     return tier;
 }
 
-program sealary_pay.aleo {
+program sealary_payroll.aleo {
     @noupgrade
     constructor() {}
 
