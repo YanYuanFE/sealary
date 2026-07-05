@@ -26,6 +26,7 @@ export function CreateOrg() {
   const { connected, address } = useWallet()
   const [name, setName] = useState('')
   const [region, setRegion] = useState('ES') // ISO-2 国家码（DB 列仍叫 region）
+  const [payDay, setPayDay] = useState(25) // 每月发薪日
   const [tokenId, setTokenId] = useState('')
   const [token, setToken] = useState<TokenInfo | null>(null)
   const [existing, setExisting] = useState<Company | null>(null)
@@ -42,7 +43,7 @@ export function CreateOrg() {
     if (!ready || !address || !token) return
     setBusy(true)
     try {
-      await createCompany({ name: name.trim(), region, tokenId: tokenId.trim(), symbol: token.symbol || token.name, decimals: token.decimals })
+      await createCompany({ name: name.trim(), region, tokenId: tokenId.trim(), symbol: token.symbol || token.name, decimals: token.decimals, payDay })
       toast.success(`Organization “${name.trim()}” created`, { description: `Payroll token ${token.symbol || token.name} · ${token.decimals} decimals` })
       navigate('/employer')
     } catch (e) {
@@ -88,6 +89,13 @@ export function CreateOrg() {
             <datalist id="iso-countries">
               {COUNTRIES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
             </datalist>
+          </Field>
+          <Field label="Pay day (monthly)">
+            <select className="field" value={payDay} onChange={(e) => setPayDay(Number(e.target.value))}>
+              {Array.from({ length: 28 }, (_, i) => i + 1).map((d) => (
+                <option key={d} value={d}>Day {d}</option>
+              ))}
+            </select>
           </Field>
           <Field label="Payroll token_id">
             <input className="field font-mono text-xs" value={tokenId} onChange={(e) => setTokenId(e.target.value.trim())} placeholder="7777field" />

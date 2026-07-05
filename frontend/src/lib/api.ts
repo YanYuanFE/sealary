@@ -10,6 +10,7 @@ export type Company = {
   tokenId: string
   symbol: string
   decimals: number
+  payDay: number // 每月发薪日（1-28）
 }
 
 // 后端只存身份 PII（name/address）——薪资绝不进后端（隐私红线，见 PRIVACY_AUDIT）。

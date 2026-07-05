@@ -15,6 +15,9 @@ create table if not exists company (
   created_at    timestamptz not null default now()
 );
 
+-- 发薪日（每月几号，1-28）：建组织时选，控制台倒计时用
+alter table company add column if not exists pay_day int not null default 25;
+
 create table if not exists encryption_keys (
   key_ref     uuid primary key default gen_random_uuid(),
   wrapped_key bytea not null,                     -- per-person DEK，被 env 主密钥包裹

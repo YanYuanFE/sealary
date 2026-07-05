@@ -13,7 +13,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const rows = await sql`
     select p.id, p.wallet_address, p.pii_ciphertext, k.wrapped_key,
-           c.id as company_id, c.name as company_name, c.symbol, c.decimals, c.token_id
+           c.id as company_id, c.name as company_name, c.symbol, c.decimals, c.token_id, c.pay_day
     from person p
     join encryption_keys k on k.key_ref = p.key_ref
     join employment e on e.person_id = p.id
@@ -26,6 +26,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const pii = decryptPII<Pii>(r.pii_ciphertext as Buffer, unwrapKey(r.wrapped_key as Buffer))
   return res.json({
     person: { id: r.id, walletAddress: r.wallet_address, name: pii.name },
-    company: { id: r.company_id, name: r.company_name, symbol: r.symbol, decimals: r.decimals, tokenId: r.token_id },
+    company: { id: r.company_id, name: r.company_name, symbol: r.symbol, decimals: r.decimals, tokenId: r.token_id, payDay: r.pay_day },
   })
 }

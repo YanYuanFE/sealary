@@ -46,6 +46,15 @@ function parseCsv(text: string): { rows: CsvRow[]; errors: string[] } {
 const now = new Date()
 const CURRENT_PERIOD = now.getFullYear() * 100 + (now.getMonth() + 1)
 
+// 距下个发薪日的倒计时文案：今天 → "Today"，否则 "in Nd"（本月已过则滚到下月同日）。
+function payrollCountdown(payDay: number, from: Date = now): string {
+  const today = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  const next = new Date(from.getFullYear(), from.getMonth(), payDay)
+  if (next < today) next.setMonth(next.getMonth() + 1)
+  const days = Math.round((next.getTime() - today.getTime()) / 86_400_000)
+  return days === 0 ? 'Today' : `in ${days}d`
+}
+
 // 生成并下载 CSV（含引号转义）。
 function downloadCsv(filename: string, rows: string[][]) {
   const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\n')
@@ -334,8 +343,8 @@ function Console({ company, address, executeTransaction, requestRecords }: {
         <StatCard label="Funded" hint={balance === null ? 'on-chain' : 'unspent balance'}>
           {balance === null ? <SealedAmount amount={0} revealed={false} size="md" token={company.symbol} /> : <SealedAmount amount={balance} revealed={reveal} size="md" token={company.symbol} />}
         </StatCard>
-        <StatCard label="This period" hint={`${roster.length} employees`}>
-          {period(CURRENT_PERIOD)}
+        <StatCard label="Next payroll" hint={`${period(CURRENT_PERIOD)} · day ${company.payDay} · ${roster.length} employees`}>
+          {payrollCountdown(company.payDay)}
         </StatCard>
         <StatCard label="Pending" hint={`${pending.length} unpaid`}>
           <SealedAmount amount={pendingTotal} revealed={reveal} size="md" token={company.symbol} />
