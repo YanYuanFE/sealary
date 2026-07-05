@@ -12,7 +12,7 @@ const nav = [
   { to: '/verify', label: 'Verify' },
 ]
 
-// 连钱包 → 绑定认证钱包 + 尝试 SIWA 登录（拿会话 JWT；dev 下失败则回退 x-dev-wallet）。
+// 连钱包 → 绑定认证钱包 + SIWA 登录（拿会话 JWT；已有未过期会话则静默恢复，不弹签名）。
 function useAuthSync() {
   const { connected, address, signMessage } = useWallet()
   useEffect(() => {

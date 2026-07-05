@@ -24,18 +24,18 @@ frontend/
 - ✅ **已自检**：`api/_lib/crypto.ts`（AES-256-GCM 往返 / 密钥包裹 / crypto-shred / 篡改检测）。
 - ✅ **本地端到端已验**（真实 Neon）：companies/employees/me 读写 + PII 加密解密往返 + 所有权 403 全通过。
 - ✅ **SIWA 验签已落地**（`@provablehq/sdk`，动态 import 只在 /auth/verify 加载）：用真实 Aleo 签名验证 nonce→sign→verify→JWT→Bearer 全链路通过（有效签发 token、错误签名 401）。
-- ⚠️ **一个未测点**：前端 `auth.ts` 假设钱包 `signMessage` 返回的是 `sign1…` 字符串的 UTF-8 字节（`TextDecoder` 解回）。SDK 造的签名已验证；**真实浏览器钱包的字节格式需连钱包点一次确认**——若不符，`signIn` 会失败（dev 回退 x-dev-wallet，prod 登录失败）。
+- ⚠️ **一个未测点**：前端 `auth.ts` 假设钱包 `signMessage` 返回的是 `sign1…` 字符串的 UTF-8 字节（`TextDecoder` 解回）。SDK 造的签名已验证；**真实浏览器钱包的字节格式需连钱包点一次确认**——若不符，`signIn` 会失败、受保护端点 401（dev/prod 同一条路，本地即可复现）。
 
 ## 本地开发（无需 vercel dev）
 
 `vite.config.ts` 的 `devApi()` 插件把 `api/*.ts` 挂进 Vite dev server，`npm run dev` 一个命令同时跑前端和 API。
 
 1. `frontend/.env.local`（gitignored）填 `DATABASE_URL`（Neon）、`MASTER_KEY`（`openssl rand -base64 32`）、
-   `SESSION_SECRET`（`openssl rand -hex 32`）、`ALLOW_DEV_AUTH=true`。
+   `SESSION_SECRET`（`openssl rand -hex 32`）。
 2. `npm run db:push` 建表（node 脚本，免 psql）。
 3. `npm run dev` → API 在 `http://localhost:5173/api/*`。
-4. **dev 免签名认证**：`ALLOW_DEV_AUTH=true` 时可用 `x-dev-wallet: <地址>` 头代替会话 token 调受保护端点
-   （仅本地；生产绝不设 `ALLOW_DEV_AUTH`）。
+4. **认证 dev/prod 同一条路**：连钱包走 SIWA 签名换 JWT（localStorage 存 7 天，刷新不重签）。
+   曾有 `ALLOW_DEV_AUTH` + `x-dev-wallet` 免签旁路，因 dev/prod 行为分叉难调试已移除。
 
 ## Provision（一次性）
 

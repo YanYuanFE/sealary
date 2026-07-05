@@ -1,5 +1,5 @@
 // 组织 / 花名册数据层 —— 调后端 /api（同源，Vercel functions；本地由 vite devApi 插件服务）。
-// 认证：认证钱包由 authHeaders() 携带（dev x-dev-wallet / prod SIWA JWT）。
+// 认证：authHeaders() 携带 SIWA 会话 JWT（dev/prod 同一条路）。
 // §15 合规：链下不存工资金额【明文】——salary 与姓名一同在服务端 AES-256-GCM 加密存储。
 import { authHeaders, authReady } from './auth'
 

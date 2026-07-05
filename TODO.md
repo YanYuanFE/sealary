@@ -21,7 +21,7 @@
 - [x] **创建组织流程**（`/setup`）：输入 name/region/token_id → `TokenCard` 链上校验代币信息（拉不到禁用提交）→ 建组织
 - [x] **金额口径统一**（`lib/units.ts` toBase/fromBase + u128→ascii，自检 5/5）：链上 base units、展示人类可读，pay/prove 两端同缩放
 - [x] **后端**（`frontend/api/`，与前端同 Vercel 项目）：schema（5 表）+ 服务端 AES-256-GCM PII 加密（自检 4/4）+ crypto-shred + companies/employees/me/persons handlers。**Neon 已建、本地端到端验通**
-- [x] **本地 API 调试**：vite `devApi()` 插件把 `api/*.ts` 挂进 dev server（`npm run dev` 同时跑前端+API，无需 vercel dev）；`db-push.mjs` 免 psql 建表；`ALLOW_DEV_AUTH` + `x-dev-wallet` 头 dev 免签名
+- [x] **本地 API 调试**：vite `devApi()` 插件把 `api/*.ts` 挂进 dev server（`npm run dev` 同时跑前端+API，无需 vercel dev）；`db-push.mjs` 免 psql 建表。~~`ALLOW_DEV_AUTH` + `x-dev-wallet` dev 免签名~~ 已移除——dev/prod 认证统一走 SIWA（旁路掩盖 prod 专属 bug，难调试）；会话 JWT 存 localStorage 7 天，刷新不重签
 - [x] **前端接后端**：`lib/api.ts` 改 async fetch(`/api`)，CreateOrg/Employer/Employee 改 useEffect+state；`lib/auth.ts` 管会话（dev x-dev-wallet / prod SIWA JWT），AppShell 连钱包即 signIn
 - [x] **隐私审计 + 方案 D**（`PRIVACY_AUDIT.md`）：对标 Zama 薪资获奖项目（DripPay/Paychain），发现"薪资明文经后端"是唯一实质差距 → 薪资改为链上加密 `sealary_conf.aleo/SalaryConfig`（雇主自有 record，后端零参与）。合约部署 tx `at1flh8kex…`；后端 salary 全移除（强塞也丢弃）；前端加员工链上写/花名册链上读/发薪用链上金额
 - [x] **薪资批量 `set_salary_batch`**（`sealary_conf.aleo`）：定长 8 + 补位（amount>0 过滤），一笔 tx 设 8 人 → CSV 导入审批数从 N 降到 ⌈N/8⌉。链上实测 tx `at1450n8fz…`（费 0.0048）

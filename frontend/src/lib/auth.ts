@@ -1,4 +1,4 @@
-// 认证会话。dev：ALLOW_DEV_AUTH 下用 x-dev-wallet 头免签名；prod：SIWA 会话 JWT（signIn 后）。
+// 认证会话：SIWA 会话 JWT（signIn 后）。dev/prod 同一条路，无免签旁路。
 let currentWallet: string | null = null
 let sessionToken: string | null = null
 let pending: Promise<boolean> | null = null // in-flight / 已落定的 signIn（防重复弹签名窗）
@@ -27,9 +27,7 @@ export function setWallet(wallet: string | null) {
 }
 
 export function authHeaders(): Record<string, string> {
-  if (sessionToken) return { authorization: `Bearer ${sessionToken}` }
-  if (currentWallet && import.meta.env.DEV) return { 'x-dev-wallet': currentWallet }
-  return {}
+  return sessionToken ? { authorization: `Bearer ${sessionToken}` } : {}
 }
 
 // API 层在首个请求前 await：等 signIn 落定（拿到 token / 失败回退），消除 prod 下 401 竞态。
@@ -62,7 +60,7 @@ async function doSignIn(wallet: string, signMessage: SignMessage): Promise<boole
       return true
     }
   } catch {
-    /* 回退到 dev 头 */
+    /* 登录失败 → 无会话，受保护端点返回 401 */
   }
   return false
 }
@@ -70,8 +68,6 @@ async function doSignIn(wallet: string, signMessage: SignMessage): Promise<boole
 // Sign in with Aleo：nonce → 钱包签名 → 服务端验签 → 存会话 JWT。
 // 幂等：已有会话直接返回；同一钱包只发起一次（signMessage 引用变化不再重复弹窗）。
 export function signIn(wallet: string, signMessage: SignMessage): Promise<boolean> {
-  // dev 走 x-dev-wallet 头免签名（authHeaders），不弹签名窗；SIWA 在 prod/preview 上验证。
-  if (import.meta.env.DEV) return Promise.resolve(false)
   if (sessionToken && wallet === currentWallet) return Promise.resolve(true)
   if (!pending) pending = doSignIn(wallet, signMessage)
   return pending

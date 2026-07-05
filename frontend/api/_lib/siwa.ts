@@ -51,14 +51,8 @@ export async function readSession(token: string): Promise<{ wallet: string } | n
   }
 }
 
-// 会话辅助：从 Authorization: Bearer <jwt> 取已认证钱包。
+// 会话辅助：从 Authorization: Bearer <jwt> 取已认证钱包。dev/prod 同一条路，无旁路。
 export async function authWallet(req: { headers: Record<string, string | string[] | undefined> }): Promise<string | null> {
-  // dev-only 旁路：本地 API 调试免 SIWA，用 x-dev-wallet 头指定钱包。生产绝不设 ALLOW_DEV_AUTH。
-  if (process.env.ALLOW_DEV_AUTH === 'true') {
-    const dev = req.headers['x-dev-wallet']
-    const w = Array.isArray(dev) ? dev[0] : dev
-    if (w) return w
-  }
   const h = req.headers['authorization']
   const token = (Array.isArray(h) ? h[0] : h)?.replace(/^Bearer /, '')
   if (!token) return null
