@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { toast } from 'sonner'
-import { Eye, EyeOff, Send, UserPlus, Upload, Download, Coins, Building2, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Send, UserPlus, Upload, Download, Coins, Building2, Loader2, Trash2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -16,7 +16,7 @@ import { Card } from '@/components/ui/card'
 import { shortAddr, money, period } from '@/lib/format'
 import { payBatchOpts, PAY_BATCH, setSalaryOpts, updateSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM } from '@/lib/aleo'
 import { toBase, fromBase } from '@/lib/units'
-import { getCompany, listEmployees, addEmployee, listPayments, recordPayment, type Company, type Person, type Payment } from '@/lib/api'
+import { getCompany, listEmployees, addEmployee, forgetEmployee, listPayments, recordPayment, type Company, type Person, type Payment } from '@/lib/api'
 
 const isAleoAddr = (a: string) => /^aleo1[a-z0-9]{58}$/.test(a)
 
@@ -45,6 +45,17 @@ function parseCsv(text: string): { rows: CsvRow[]; errors: string[] } {
 
 const now = new Date()
 const CURRENT_PERIOD = now.getFullYear() * 100 + (now.getMonth() + 1)
+
+// 生成并下载 CSV（含引号转义）。
+function downloadCsv(filename: string, rows: string[][]) {
+  const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\n')
+  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
+  const a = document.createElement('a')
+  a.href = url
+  a.download = filename
+  a.click()
+  URL.revokeObjectURL(url)
+}
 
 type Wallet = Pick<ReturnType<typeof useWallet>, 'requestRecords' | 'executeTransaction'>
 
@@ -159,6 +170,8 @@ function Console({ company, address, executeTransaction, requestRecords }: {
   const [reveal, setReveal] = useState(false)
   const [busy, setBusy] = useState(false)
   const [balance, setBalance] = useState<number | null>(null)
+  const [removing, setRemoving] = useState<Person | null>(null) // 待确认移除的员工
+  const [shredding, setShredding] = useState(false)
 
   useEffect(() => {
     listEmployees(company.id).then(setRoster).catch(() => setRoster([]))
@@ -189,11 +202,53 @@ function Console({ company, address, executeTransaction, requestRecords }: {
   const sum = (list: Person[]) => list.reduce((s, e) => s + (salaryOf(e) ?? 0), 0)
   const payrollTotal = sum(roster)
   const pendingTotal = sum(pending)
+  const batchTotal = sum(payable.slice(0, PAY_BATCH)) // 本批总额（余额预警用）
 
   function refresh() {
     listEmployees(company.id).then(setRoster).catch(() => {})
     fetchSalaries(requestRecords).then(setSalaries).catch(() => {})
     listPayments(company.id).then(setPayments).catch(() => {})
+  }
+
+  // 被遗忘权：后端删身份 + crypto-shred。链上 SalaryConfig 不动——
+  // 花名册没了此人就发不了薪；若日后重新入职，AddEmployee 的 update 路径会直接复用旧 record。
+  async function forget() {
+    if (!removing) return
+    setShredding(true)
+    try {
+      await forgetEmployee(removing.id)
+      toast.success(`${removing.name} removed · PII crypto-shredded`)
+      setRemoving(null)
+      refresh()
+    } catch (e) {
+      toast.error('Remove failed', { description: String((e as Error)?.message ?? e) })
+    } finally {
+      setShredding(false)
+    }
+  }
+
+  // 导出发薪历史 CSV（雇主本机文件；金额取当前链上 SalaryConfig）。
+  function exportCsv() {
+    if (payments.length === 0) {
+      toast.error('No payments to export yet')
+      return
+    }
+    const rows = [['period', 'employee', 'address', 'amount', 'token', 'tx_id', 'date']]
+    for (const p of payments) {
+      const person = roster.find((r) => r.id === p.personId)
+      const cfg = person ? salaries[person.walletAddress] : undefined
+      rows.push([
+        String(p.period),
+        person?.name ?? '',
+        person?.walletAddress ?? '',
+        cfg ? String(fromBase(cfg.amount, company.decimals)) : '',
+        company.symbol,
+        p.txId,
+        new Date(p.createdAt).toISOString(),
+      ])
+    }
+    downloadCsv(`sealary-payments-${company.name.replace(/\s+/g, '-')}.csv`, rows)
+    toast.success(`Exported ${payments.length} payment rows`)
   }
 
   // 一笔 pay_batch 发本批最多 4 人（薪资取自链上 SalaryConfig，已是 base units）。
@@ -242,7 +297,7 @@ function Console({ company, address, executeTransaction, requestRecords }: {
         desc={`Pay ${company.name} in ${company.symbol}. Salaries live encrypted on-chain — the server never sees them. Each pay is a private transfer + a sealed Paystub.`}
         actions={
           <>
-            <Button variant="outline" className="rounded-full" onClick={() => toast('Export coming with the backend')}>
+            <Button variant="outline" className="rounded-full" onClick={exportCsv}>
               <Download className="size-4" /> Export
             </Button>
             <ImportCsv
@@ -285,7 +340,7 @@ function Console({ company, address, executeTransaction, requestRecords }: {
               {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               {reveal ? 'Seal' : 'Reveal'}
             </Button>
-            <RunBatchDialog batchN={batchN} payableN={payable.length} total={pendingTotal} reveal={reveal} onConfirm={runBatch} busy={busy} token={company.symbol} />
+            <RunBatchDialog batchN={batchN} payableN={payable.length} total={pendingTotal} batchTotal={batchTotal} balance={balance} reveal={reveal} onConfirm={runBatch} busy={busy} token={company.symbol} />
           </div>
         </div>
 
@@ -299,6 +354,7 @@ function Console({ company, address, executeTransaction, requestRecords }: {
                 <th className="px-5 py-3 font-normal">Address</th>
                 <th className="px-5 py-3 text-right font-normal">Salary</th>
                 <th className="px-5 py-3 text-right font-normal">Status</th>
+                <th className="w-10 px-2 py-3" />
               </tr>
             </thead>
             <tbody>
@@ -320,6 +376,11 @@ function Console({ company, address, executeTransaction, requestRecords }: {
                         ? <Badge variant="outline" className="border-proven/30 bg-proven-soft/50 text-proven">Paid</Badge>
                         : <Badge variant="outline" className="text-muted-foreground">Pending</Badge>}
                     </td>
+                    <td className="px-2 py-3.5 text-right">
+                      <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-destructive" onClick={() => setRemoving(e)} aria-label={`Remove ${e.name}`}>
+                        <Trash2 className="size-4" />
+                      </Button>
+                    </td>
                   </tr>
                 )
               })}
@@ -327,6 +388,25 @@ function Console({ company, address, executeTransaction, requestRecords }: {
           </table>
         )}
       </div>
+
+      {/* 被遗忘权确认（GDPR Art.17：删身份 + 销毁其加密密钥） */}
+      <Dialog open={!!removing} onOpenChange={(v) => { if (!v) setRemoving(null) }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle className="font-heading text-xl">Remove {removing?.name}?</DialogTitle>
+            <DialogDescription>
+              Deletes their identity and destroys its encryption key (crypto-shred) — the stored ciphertext becomes
+              permanently unreadable (GDPR right to be forgotten). Sealed on-chain records are untouched.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" className="rounded-full" onClick={() => setRemoving(null)}>Cancel</Button>
+            <Button variant="destructive" className="rounded-full" onClick={forget} disabled={shredding}>
+              <Trash2 className="size-4" /> {shredding ? 'Shredding…' : 'Remove & shred'}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <PaymentHistory payments={payments} roster={roster} salaries={salaries} decimals={company.decimals} reveal={reveal} symbol={company.symbol} />
 
@@ -406,10 +486,15 @@ function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol }
 }
 
 function RunBatchDialog(
-  { batchN, payableN, total, reveal, onConfirm, busy, token }:
-  { batchN: number; payableN: number; total: number; reveal: boolean; onConfirm: () => void | Promise<void>; busy: boolean; token: string },
+  { batchN, payableN, total, batchTotal, balance, reveal, onConfirm, busy, token }:
+  {
+    batchN: number; payableN: number; total: number; batchTotal: number; balance: number | null
+    reveal: boolean; onConfirm: () => void | Promise<void>; busy: boolean; token: string
+  },
 ) {
   const [open, setOpen] = useState(false)
+  // 只判定"聚合余额都不够"的确定性不足；余额分散在多张 record 的情况由 pickTokenUid 在执行时兜底。
+  const insufficient = balance != null && balance < batchTotal
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
@@ -427,12 +512,18 @@ function RunBatchDialog(
         </DialogHeader>
         <div className="rounded-lg border border-border bg-secondary/40 p-4 text-sm">
           <Row k="This batch" v={`${batchN} of ${payableN} payable`} />
+          <Row k="Batch total" v={reveal ? `${money(batchTotal)} ${token}` : `•••••• ${token}`} />
           <Row k="Pending total" v={reveal ? `${money(total)} ${token}` : `•••••• ${token}`} />
           <Row k="Public state" v="0 amounts revealed" mono />
         </div>
+        {insufficient && (
+          <p className="text-xs text-destructive">
+            Insufficient funds{reveal ? `: ${money(balance)} ${token} on hand < ${money(batchTotal)} ${token} batch total` : ' for this batch'} — mint more {token} first.
+          </p>
+        )}
         <DialogFooter>
           <Button variant="outline" className="rounded-full" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button className="rounded-full" disabled={busy} onClick={async () => { await onConfirm(); setOpen(false) }}>
+          <Button className="rounded-full" disabled={busy || insufficient} onClick={async () => { await onConfirm(); setOpen(false) }}>
             <Send className="size-4" /> {busy ? 'Sealing…' : 'Confirm & seal'}
           </Button>
         </DialogFooter>

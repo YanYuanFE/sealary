@@ -67,6 +67,11 @@ export function recordPayment(companyId: string, period: number, txId: string, p
   return req<{ ok: boolean }>('/payments', { method: 'POST', body: JSON.stringify({ companyId, period, txId, personIds }) })
 }
 
+// 被遗忘权（GDPR Art.17）：删员工 + crypto-shred 其 PII 密钥，密文永久不可解。
+export function forgetEmployee(personId: string) {
+  return req<{ shredded: boolean }>(`/persons?id=${encodeURIComponent(personId)}`, { method: 'DELETE' })
+}
+
 // 员工视角：按认证钱包取自己的身份 + 公司。未入职则 null。
 export function getMe() {
   return req<{ person: Person; company: Company } | null>('/me')
