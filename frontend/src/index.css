@@ -1,0 +1,208 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/geist";
+@import "@fontsource-variable/geist-mono";
+@import "@fontsource-variable/fraunces";
+
+/* ── Sealary theme ──────────────────────────────────────────────
+   "Sealed salary, provable income."
+   Warm-paper light theme · ink primary · sealing-wax (oxblood) brand
+   · botanical green = verified. Serif display / grotesque UI / mono data.
+   ─────────────────────────────────────────────────────────────── */
+
+@theme inline {
+    --font-sans: 'Geist Variable', ui-sans-serif, system-ui, sans-serif;
+    --font-heading: 'Fraunces Variable', ui-serif, Georgia, serif;
+    --font-mono: 'Geist Mono Variable', ui-monospace, monospace;
+
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-destructive: var(--destructive);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+
+    /* brand tokens */
+    --color-seal: var(--seal);
+    --color-seal-foreground: var(--seal-foreground);
+    --color-seal-soft: var(--seal-soft);
+    --color-proven: var(--proven);
+    --color-proven-foreground: var(--proven-foreground);
+    --color-proven-soft: var(--proven-soft);
+    --color-pending: var(--pending);
+    --color-pending-foreground: var(--pending-foreground);
+    --color-pending-soft: var(--pending-soft);
+    --color-paper: var(--paper);
+    --color-ink: var(--ink);
+
+    --radius-sm: calc(var(--radius) * 0.6);
+    --radius-md: calc(var(--radius) * 0.85);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) * 1.5);
+    --radius-2xl: calc(var(--radius) * 2);
+}
+
+:root {
+    --radius: 0.4rem;
+
+    /* warm stationery paper */
+    --background: oklch(0.982 0.007 83);
+    --paper: oklch(0.982 0.007 83);
+    --foreground: oklch(0.235 0.014 62);
+    --ink: oklch(0.235 0.014 62);
+
+    --card: oklch(0.997 0.004 90);
+    --card-foreground: oklch(0.235 0.014 62);
+    --popover: oklch(0.997 0.004 90);
+    --popover-foreground: oklch(0.235 0.014 62);
+
+    /* ink primary — institutional, refined */
+    --primary: oklch(0.255 0.018 60);
+    --primary-foreground: oklch(0.985 0.008 88);
+
+    --secondary: oklch(0.955 0.009 82);
+    --secondary-foreground: oklch(0.28 0.016 60);
+    --muted: oklch(0.955 0.009 82);
+    --muted-foreground: oklch(0.505 0.016 62);
+    --accent: oklch(0.94 0.012 78);
+    --accent-foreground: oklch(0.28 0.016 60);
+
+    --destructive: oklch(0.585 0.2 27);
+    --border: oklch(0.9 0.011 78);
+    --input: oklch(0.9 0.011 78);
+    --ring: oklch(0.47 0.145 32);
+
+    /* sealing-wax (oxblood) — the brand seal */
+    --seal: oklch(0.47 0.145 32);
+    --seal-foreground: oklch(0.985 0.008 88);
+    --seal-soft: oklch(0.93 0.045 40);
+
+    /* botanical green — verified / proven */
+    --proven: oklch(0.5 0.09 152);
+    --proven-foreground: oklch(0.985 0.008 88);
+    --proven-soft: oklch(0.93 0.04 152);
+
+    /* warm amber — pending / awaiting settlement */
+    --pending: oklch(0.62 0.11 72);
+    --pending-foreground: oklch(0.985 0.008 88);
+    --pending-soft: oklch(0.91 0.055 78);
+}
+
+@layer base {
+    * {
+        @apply border-border outline-ring/50;
+    }
+    body {
+        @apply bg-background text-foreground;
+        font-feature-settings: "ss01", "cv01", "cv03";
+        -webkit-font-smoothing: antialiased;
+    }
+    html {
+        @apply font-sans;
+    }
+    h1, h2, h3, .font-heading {
+        font-family: var(--font-heading);
+        font-optical-sizing: auto;
+    }
+    /* mono numerals for ledger/data feel */
+    .tabular {
+        font-variant-numeric: tabular-nums;
+    }
+}
+
+@layer components {
+    .field {
+        @apply w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground
+               shadow-xs transition-colors placeholder:text-muted-foreground/70
+               focus:border-seal/50 focus:ring-2 focus:ring-seal/15 focus:outline-none;
+    }
+}
+
+/* paper texture: barely-there warm grain + hairline grid, applied to shells */
+.paper-bg {
+    background-color: var(--paper);
+    background-image:
+        radial-gradient(oklch(0.47 0.145 32 / 0.025) 0.5px, transparent 0.5px),
+        linear-gradient(oklch(0.235 0.014 62 / 0.015) 1px, transparent 1px),
+        linear-gradient(90deg, oklch(0.235 0.014 62 / 0.015) 1px, transparent 1px);
+    background-size: 22px 22px, 22px 22px, 22px 22px;
+    background-position: 0 0, 0 0, 0 0;
+}
+
+/* Landing surfaces can show more paper tactility than the app consoles. */
+.landing-paper {
+    background-color: var(--paper);
+    background-image:
+        radial-gradient(oklch(0.47 0.145 32 / 0.035) 0.6px, transparent 0.6px),
+        linear-gradient(oklch(0.235 0.014 62 / 0.018) 1px, transparent 1px),
+        linear-gradient(90deg, oklch(0.235 0.014 62 / 0.014) 1px, transparent 1px);
+    background-size: 18px 18px, 28px 28px, 28px 28px;
+}
+
+.app-surface {
+    background-color: var(--background);
+    background-image:
+        radial-gradient(oklch(0.47 0.145 32 / 0.012) 0.5px, transparent 0.5px);
+    background-size: 24px 24px;
+}
+
+.hero-vignette {
+    background:
+        radial-gradient(circle at 78% 18%, oklch(1 0 0 / 0.7), transparent 28%),
+        radial-gradient(circle at 20% 82%, oklch(0.47 0.145 32 / 0.12), transparent 34%),
+        linear-gradient(90deg, oklch(0.982 0.007 83 / 0.98), oklch(0.982 0.007 83 / 0.72) 42%, oklch(0.982 0.007 83 / 0.34));
+}
+
+.glass-proof {
+    background:
+        linear-gradient(135deg, oklch(1 0 0 / 0.58), oklch(1 0 0 / 0.22)),
+        linear-gradient(90deg, transparent, oklch(1 0 0 / 0.35), transparent);
+    box-shadow:
+        inset 0 1px 0 oklch(1 0 0 / 0.6),
+        0 20px 60px -42px oklch(0.235 0.014 62 / 0.45);
+}
+
+/* wax-seal emboss for the logo mark */
+.seal-emboss {
+    box-shadow:
+        inset 0 1px 1px oklch(1 0 0 / 0.35),
+        inset 0 -2px 3px oklch(0.3 0.12 32 / 0.55),
+        0 1px 2px oklch(0.3 0.1 32 / 0.35);
+}
+
+/* entrance reveals — CSS-driven, bulletproof (no JS animation dependency) */
+@keyframes reveal-up {
+    from { opacity: 0; transform: translateY(14px); }
+    to   { opacity: 1; transform: none; }
+}
+.reveal {
+    animation: reveal-up 0.6s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+@keyframes reveal-blur {
+    from { opacity: 0; filter: blur(6px); transform: translateY(2px); }
+    to   { opacity: 1; filter: blur(0); transform: none; }
+}
+.reveal-blur {
+    animation: reveal-blur 0.35s ease-out both;
+}
+
+/* redaction shimmer on sealed values */
+@keyframes seal-shimmer {
+    0%, 100% { opacity: 0.55; }
+    50%      { opacity: 0.85; }
+}
+.sealed-mark {
+    animation: seal-shimmer 3.2s ease-in-out infinite;
+}

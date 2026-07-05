@@ -1,0 +1,21 @@
+# secrets — never commit (deployment keys, session/master keys)
+**/.env
+.env
+*.pem
+*.key
+
+# dependencies / build artifacts
+**/node_modules/
+**/dist/
+**/build/
+**/.vite/
+*.avm
+*.prover
+*.verifier
+
+# os / editor
+.DS_Store
+**/.DS_Store
+.vscode/*
+!.vscode/extensions.json
+.idea

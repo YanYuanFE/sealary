@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100">
+  <defs>
+    <radialGradient id="wax" cx="42%" cy="38%" r="70%">
+      <stop offset="0%" stop-color="#a23b34"/>
+      <stop offset="100%" stop-color="#6f251f"/>
+    </radialGradient>
+  </defs>
+  <polygon fill="url(#wax)" points="50,3 61,10 74,8 80,20 92,27 90,40 97,50 90,60 92,73 80,80 74,92 61,90 50,97 39,90 26,92 20,80 8,73 10,60 3,50 10,40 8,27 20,20 26,8 39,10"/>
+  <circle cx="50" cy="50" r="37" fill="none" stroke="#ffffff" stroke-opacity="0.5" stroke-width="1.6" stroke-dasharray="2 3"/>
+  <text x="50" y="50" dy="0.34em" text-anchor="middle" font-family="Georgia, serif" font-weight="600" font-size="46" fill="#ffffff" fill-opacity="0.92">S</text>
+</svg>

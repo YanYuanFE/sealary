@@ -1,0 +1,16 @@
+{
+  "program": "sealary_pay.aleo",
+  "version": "0.1.0",
+  "description": "",
+  "license": "MIT",
+  "leo": "4.2.0",
+  "dependencies": [
+    {
+      "name": "token_registry.aleo",
+      "location": "network",
+      "path": null,
+      "edition": null
+    }
+  ],
+  "dev_dependencies": null
+}
