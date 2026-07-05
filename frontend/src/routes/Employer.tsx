@@ -13,9 +13,9 @@ import { SealedAmount } from '@/components/SealedAmount'
 import { ConnectButton } from '@/components/ConnectButton'
 import { Card } from '@/components/ui/card'
 import { shortAddr, money, period } from '@/lib/format'
-import { payBatchOpts, PAY_BATCH, setSalaryOpts, updateSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM } from '@/lib/aleo'
+import { payBatchOpts, PAY_BATCH, setSalaryOpts, updateSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM, EXPLORER_TX } from '@/lib/aleo'
 import { toBase, fromBase } from '@/lib/units'
-import { getCompany, listEmployees, addEmployee, type Company, type Person } from '@/lib/api'
+import { getCompany, listEmployees, addEmployee, listPayments, recordPayment, type Company, type Person, type Payment } from '@/lib/api'
 
 const isAleoAddr = (a: string) => /^aleo1[a-z0-9]{58}$/.test(a)
 
@@ -154,7 +154,7 @@ function Console({ company, address, executeTransaction, requestRecords }: {
 }) {
   const [roster, setRoster] = useState<Person[]>([])
   const [salaries, setSalaries] = useState<Record<string, SalaryCfg>>({}) // 地址 → 薪资(base)+uid，来自链上 SalaryConfig
-  const [paidIds, setPaidIds] = useState<Set<string>>(new Set())
+  const [payments, setPayments] = useState<Payment[]>([]) // 发薪记录（后端元数据，无金额）
   const [reveal, setReveal] = useState(false)
   const [busy, setBusy] = useState(false)
   const [balance, setBalance] = useState<number | null>(null)
@@ -163,7 +163,14 @@ function Console({ company, address, executeTransaction, requestRecords }: {
     listEmployees(company.id).then(setRoster).catch(() => setRoster([]))
     fetchSalaries(requestRecords).then(setSalaries).catch(() => setSalaries({}))
     fetchBalance(requestRecords, company.tokenId, company.decimals).then(setBalance)
+    listPayments(company.id).then(setPayments).catch(() => setPayments([]))
   }, [company.id, requestRecords, company.tokenId, company.decimals])
+
+  // Paid = 本期已有发薪记录（后端持久化，刷新不丢）。
+  const paidIds = useMemo(
+    () => new Set(payments.filter((p) => p.period === CURRENT_PERIOD).map((p) => p.personId)),
+    [payments],
+  )
 
   // 某员工的薪资（人类值）；未设置/待上链则 undefined。
   const salaryOf = (e: Person): number | undefined => {
@@ -185,6 +192,7 @@ function Console({ company, address, executeTransaction, requestRecords }: {
   function refresh() {
     listEmployees(company.id).then(setRoster).catch(() => {})
     fetchSalaries(requestRecords).then(setSalaries).catch(() => {})
+    listPayments(company.id).then(setPayments).catch(() => {})
   }
 
   // 一笔 pay_batch 发本批最多 4 人（薪资取自链上 SalaryConfig，已是 base units）。
@@ -206,11 +214,10 @@ function Console({ company, address, executeTransaction, requestRecords }: {
         return
       }
       const res = await executeTransaction(payBatchOpts(uid, tos, amounts, CURRENT_PERIOD))
-      setPaidIds((s) => {
-        const n = new Set(s)
-        targets.forEach((t) => n.add(t.id))
-        return n
-      })
+      // 发薪历史记后端（只元数据：人/期/tx——金额绝不进后端）。链上已成功，落库失败仅提示。
+      await recordPayment(company.id, CURRENT_PERIOD, res?.transactionId ?? 'unknown', targets.map((t) => t.id))
+        .then(() => listPayments(company.id).then(setPayments))
+        .catch(() => toast.warning('Paid on-chain, but saving history failed', { description: 'It will not appear in Payment history.' }))
       toast.success(`Sealed pay → ${targets.length} employee${targets.length > 1 ? 's' : ''}`, {
         description: (res?.transactionId ?? 'submitted') + (payable.length > targets.length ? ' · run again for the next batch' : ''),
       })
@@ -315,9 +322,85 @@ function Console({ company, address, executeTransaction, requestRecords }: {
         )}
       </div>
 
+      <PaymentHistory payments={payments} roster={roster} salaries={salaries} decimals={company.decimals} reveal={reveal} symbol={company.symbol} />
+
       <p className="text-center font-mono text-xs text-muted-foreground">
         Total roster · {reveal ? `${money(payrollTotal)} ${company.symbol}` : '•••••• ' + company.symbol} / period
       </p>
+    </div>
+  )
+}
+
+// 发薪历史：按 tx 聚合成批次行。后端只有元数据（谁/哪期/哪笔 tx）；
+// 金额来自当前链上 SalaryConfig（后端无金额可回溯，调薪后历史行跟随现值）。
+function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol }: {
+  payments: Payment[]; roster: Person[]; salaries: Record<string, SalaryCfg>
+  decimals: number; reveal: boolean; symbol: string
+}) {
+  const runs = useMemo(() => {
+    const m = new Map<string, Payment[]>()
+    for (const p of payments) {
+      const l = m.get(p.txId)
+      if (l) l.push(p)
+      else m.set(p.txId, [p])
+    }
+    return [...m.values()]
+  }, [payments])
+
+  if (runs.length === 0) return null
+
+  const personOf = (pid: string) => roster.find((r) => r.id === pid)
+  const totalOf = (ps: Payment[]) =>
+    ps.reduce((s, p) => {
+      const cfg = salaries[personOf(p.personId)?.walletAddress ?? '']
+      return s + (cfg ? fromBase(cfg.amount, decimals) : 0)
+    }, 0)
+
+  return (
+    <div className="rounded-xl border border-border/80 bg-card">
+      <div className="border-b border-border/70 px-5 py-4">
+        <h2 className="font-heading text-lg font-semibold">Payment history</h2>
+        <p className="text-sm text-muted-foreground">Who &amp; when — amounts stay sealed on-chain, the server stores none.</p>
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border/70 text-left font-mono text-xs tracking-wide text-muted-foreground uppercase">
+            <th className="px-5 py-3 font-normal">Period</th>
+            <th className="px-5 py-3 font-normal">Employees</th>
+            <th className="px-5 py-3 text-right font-normal">Amount</th>
+            <th className="px-5 py-3 font-normal">Transaction</th>
+            <th className="px-5 py-3 text-right font-normal">Date</th>
+          </tr>
+        </thead>
+        <tbody>
+          {runs.map((ps) => {
+            const first = ps[0]
+            return (
+              <tr key={first.id} className="border-b border-border/50 last:border-0 hover:bg-secondary/40">
+                <td className="px-5 py-3.5 font-medium">{period(first.period)}</td>
+                <td className="px-5 py-3.5 text-muted-foreground">
+                  {ps.map((p) => personOf(p.personId)?.name ?? '—').join(', ')}
+                </td>
+                <td className="px-5 py-3.5 text-right">
+                  <SealedAmount amount={totalOf(ps)} revealed={reveal} size="sm" token={symbol} />
+                </td>
+                <td className="px-5 py-3.5 font-mono text-xs">
+                  {first.txId.startsWith('at1') ? (
+                    <a href={EXPLORER_TX(first.txId)} target="_blank" rel="noreferrer" className="text-seal hover:underline">
+                      {shortAddr(first.txId, 8, 6)}
+                    </a>
+                  ) : (
+                    <span className="text-muted-foreground">{first.txId}</span>
+                  )}
+                </td>
+                <td className="px-5 py-3.5 text-right font-mono text-xs text-muted-foreground">
+                  {new Date(first.createdAt).toLocaleDateString()}
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
     </div>
   )
 }

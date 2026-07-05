@@ -15,6 +15,9 @@ export const API_BASE = `${ENDPOINT}/${NETWORK}`
 // 手续费（microcredits）。部署后按实际 execution 成本调。
 export const FEE = 1_000_000
 
+// 区块浏览器交易链接（testnet）。
+export const EXPLORER_TX = (txId: string) => `https://testnet.explorer.provable.com/transaction/${txId}`
+
 // ── 交易构造器（provablehq executeTransaction 的 TransactionOptions，对应 TECH_DESIGN §6）──
 // record 入参不再直接塞对象：用 { type:'record', program, recordname, uid } 引用，
 // uid 来自 requestRecords 返回的 RecordEnvelope.uid（Shield 等 conforming 钱包填充）。

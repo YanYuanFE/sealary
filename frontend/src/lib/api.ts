@@ -50,6 +50,23 @@ export function addEmployee(companyId: string, input: Omit<Person, 'id'>) {
   return req<Person>('/employees', { method: 'POST', body: JSON.stringify({ companyId, ...input }) })
 }
 
+// 发薪记录（仅元数据：谁/哪期/哪笔 tx——无金额，金额在链上加密）。
+export type Payment = {
+  id: string
+  personId: string
+  period: number
+  txId: string
+  createdAt: string
+}
+
+export function listPayments(companyId: string) {
+  return req<Payment[]>(`/payments?companyId=${encodeURIComponent(companyId)}`)
+}
+
+export function recordPayment(companyId: string, period: number, txId: string, personIds: string[]) {
+  return req<{ ok: boolean }>('/payments', { method: 'POST', body: JSON.stringify({ companyId, period, txId, personIds }) })
+}
+
 // 员工视角：按认证钱包取自己的身份 + 公司。未入职则 null。
 export function getMe() {
   return req<{ person: Person; company: Company } | null>('/me')

@@ -13,6 +13,7 @@ const ROUTES: Record<string, string> = {
   'auth/verify': '/api/auth/verify.ts',
   companies: '/api/companies.ts',
   employees: '/api/employees.ts',
+  payments: '/api/payments.ts',
   persons: '/api/persons.ts',
   me: '/api/me.ts',
 }

@@ -40,6 +40,17 @@ create table if not exists employment (
   unique (company_id, person_id)
 );
 
+-- 发薪记录（仅元数据：谁/哪期/哪笔 tx——金额绝不进后端，雇主端金额从链上 SalaryConfig 解）
+create table if not exists payment (
+  id         uuid primary key default gen_random_uuid(),
+  company_id uuid not null references company(id) on delete cascade,
+  person_id  uuid not null references person(id) on delete cascade,
+  period     int  not null,
+  tx_id      text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_payment_company on payment(company_id);
+
 -- append-only 审计（§15.3 Art.5(2)）
 create table if not exists access_audit_log (
   id         bigserial primary key,
