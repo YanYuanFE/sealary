@@ -40,12 +40,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const keyRows = await sql`insert into encryption_keys (wrapped_key) values (${wrapKey(dek)}) returning key_ref`
     const keyRef = keyRows[0].key_ref
     const cipher = encryptPII({ name } satisfies Pii, dek)
+    // 幂等：同钱包重复添加 / 重导 CSV → 覆盖 PII 并指向新 DEK（旧 key 行成孤儿，无害），不再撞 unique 500。
     const personRows = await sql`
       insert into person (wallet_address, pii_ciphertext, key_ref, tax_id_hmac)
       values (${walletAddress}, ${cipher}, ${keyRef}, ${taxId ? taxIdHmac(taxId) : null})
+      on conflict (wallet_address) do update
+        set pii_ciphertext = excluded.pii_ciphertext, key_ref = excluded.key_ref,
+            tax_id_hmac = coalesce(excluded.tax_id_hmac, person.tax_id_hmac)
       returning id`
     const personId = personRows[0].id
-    await sql`insert into employment (company_id, person_id) values (${companyId}, ${personId})`
+    await sql`insert into employment (company_id, person_id) values (${companyId}, ${personId}) on conflict (company_id, person_id) do nothing`
     await audit(wallet, 'employee.add', String(personId))
     return res.json({ id: personId, walletAddress, name })
   }

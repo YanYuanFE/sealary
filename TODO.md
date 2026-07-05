@@ -25,6 +25,7 @@
 - [x] **前端接后端**：`lib/api.ts` 改 async fetch(`/api`)，CreateOrg/Employer/Employee 改 useEffect+state；`lib/auth.ts` 管会话（dev x-dev-wallet / prod SIWA JWT），AppShell 连钱包即 signIn
 - [x] **隐私审计 + 方案 D**（`PRIVACY_AUDIT.md`）：对标 Zama 薪资获奖项目（DripPay/Paychain），发现"薪资明文经后端"是唯一实质差距 → 薪资改为链上加密 `sealary_conf.aleo/SalaryConfig`（雇主自有 record，后端零参与）。合约部署 tx `at1flh8kex…`；后端 salary 全移除（强塞也丢弃）；前端加员工链上写/花名册链上读/发薪用链上金额
 - [x] **薪资批量 `set_salary_batch`**（`sealary_conf.aleo`）：定长 8 + 补位（amount>0 过滤），一笔 tx 设 8 人 → CSV 导入审批数从 N 降到 ⌈N/8⌉。链上实测 tx `at1450n8fz…`（费 0.0048）
+- [x] **代码 review P0/P1 修复**：① 发薪 Token record 改 `pickTokenUid`（按 token_id 精确匹配 + 余额 ≥ 批总额取最大，不再被补位 0 额找零坑）；② 薪资写入 set/update 分流（已有 SalaryConfig → `update_salary` 消费旧 record，防新旧并存按旧薪资发钱；CSV 同地址去重取末行）；③ 后端 `person` upsert（重复添加/重导不再 500）；④ signIn 加 in-flight/已登录守卫 + `authReady()`（api 首请求前等 signIn 落定，消 prod 401 竞态；换钱包清旧 token）；⑤ 余额匹配 `token_id:\s*X\b` 防子串误配
 
 ---
 
@@ -65,6 +66,7 @@
 
 ## P2 · 硬化 / 加分（TECH_DESIGN §14–15）
 
+- [ ] review 遗留硬化：`persons.ts` 两条 delete 包事务；`nonceValid` 换 `timingSafeEqual`；`companies.ts` POST 入参校验（decimals 范围 / tokenId 格式）+ upsert 补 region；`readSession` 校验 wallet claim 类型；Employee 页多币种时按各自 token 取 decimals
 - [ ] `prove_income` 加验证者绑定 + nonce（防证明复用）
 - [ ] 多期收入聚合证明
 - [ ] KMS + 密钥轮换 + DPIA/DPA 文档

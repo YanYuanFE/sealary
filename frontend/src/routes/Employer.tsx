@@ -13,7 +13,7 @@ import { SealedAmount } from '@/components/SealedAmount'
 import { ConnectButton } from '@/components/ConnectButton'
 import { Card } from '@/components/ui/card'
 import { shortAddr, money, period } from '@/lib/format'
-import { payBatchOpts, PAY_BATCH, setSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM } from '@/lib/aleo'
+import { payBatchOpts, PAY_BATCH, setSalaryOpts, updateSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM } from '@/lib/aleo'
 import { toBase, fromBase } from '@/lib/units'
 import { getCompany, listEmployees, addEmployee, type Company, type Person } from '@/lib/api'
 
@@ -36,7 +36,10 @@ function parseCsv(text: string): { rows: CsvRow[]; errors: string[] } {
     }
     rows.push({ name, address, salary: Number(salaryStr) })
   })
-  return { rows, errors }
+  // 同地址取最后一行（重复行视为修正），避免同一人产出两条 SalaryConfig。
+  const byAddr = new Map<string, CsvRow>()
+  for (const r of rows) byAddr.set(r.address, r)
+  return { rows: [...byAddr.values()], errors }
 }
 
 const now = new Date()
@@ -44,9 +47,23 @@ const CURRENT_PERIOD = now.getFullYear() * 100 + (now.getMonth() + 1)
 
 type Wallet = Pick<ReturnType<typeof useWallet>, 'requestRecords' | 'executeTransaction'>
 
-async function firstTokenUid(requestRecords: Wallet['requestRecords']): Promise<string | undefined> {
+// 精确匹配 token_id（\b 防 "7777field" 撞上 "17777field" 的子串）。
+const hasTokenId = (recordJson: string, tokenId: string) => new RegExp(`token_id:\\s*${tokenId}\\b`).test(recordJson)
+
+// 选发薪 Token record：匹配 token_id 且余额 ≥ 本批总额的最大一张。
+// 不能拿 recs[0]：pay_batch 补位会给雇主自己留 0 额找零 record，选中它整批 underflow。
+async function pickTokenUid(requestRecords: Wallet['requestRecords'], tokenId: string, need: bigint): Promise<string | undefined> {
   const recs = await requestRecords('token_registry.aleo', true, 'unspent')
-  return (recs?.[0] as { uid?: string })?.uid
+  let best: { uid: string; amount: bigint } | undefined
+  for (const r of recs ?? []) {
+    const s = JSON.stringify(r)
+    const uid = (r as { uid?: string })?.uid
+    const amt = s.match(/amount:\s*(\d+)u128/)?.[1]
+    if (!uid || !amt || !hasTokenId(s, tokenId)) continue
+    const amount = BigInt(amt)
+    if (amount >= need && (!best || amount > best.amount)) best = { uid, amount }
+  }
+  return best?.uid
 }
 
 async function fetchBalance(requestRecords: Wallet['requestRecords'], tokenId: string, decimals: number): Promise<number | null> {
@@ -55,7 +72,7 @@ async function fetchBalance(requestRecords: Wallet['requestRecords'], tokenId: s
     let sum = 0n
     for (const r of recs) {
       const s = JSON.stringify(r)
-      if (!s.includes(tokenId)) continue
+      if (!hasTokenId(s, tokenId)) continue
       const amt = s.match(/amount:\s*(\d+)u128/)?.[1]
       if (amt) sum += BigInt(amt)
     }
@@ -65,21 +82,26 @@ async function fetchBalance(requestRecords: Wallet['requestRecords'], tokenId: s
   }
 }
 
-// 解析雇主自有的 SalaryConfig 加密 record → { 员工地址: 薪资(base units) }。
+type SalaryCfg = { amount: bigint; uid: string } // uid 用于 update_salary 消费旧 record
+
+// 解析雇主自有的 SalaryConfig 加密 record → { 员工地址: { 薪资(base units), uid } }。
 // 薪资只在链上加密、只雇主能解——后端永不接触（PRIVACY_AUDIT 方案 D）。
-function parseSalaryConfigs(records: unknown[]): Record<string, bigint> {
-  const out: Record<string, bigint> = {}
+// 同一员工若有多条（历史上重复 set_salary 产生），谁排后谁赢——record 无高度戳分不出新旧；
+// 写入端一律走 set/update 分流（已有配置 → update_salary 消费旧的），不再制造新重复。
+function parseSalaryConfigs(records: unknown[]): Record<string, SalaryCfg> {
+  const out: Record<string, SalaryCfg> = {}
   for (const r of records) {
     const s = JSON.stringify(r)
     const employee = s.match(/employee:\s*(aleo1[a-z0-9]+)/)?.[1]
     const amount = s.match(/amount:\s*(\d+)u128/)?.[1]
+    const uid = (r as { uid?: string })?.uid
     // amount>0 过滤掉 batch 的补位项（amount=0）。
-    if (employee && amount && BigInt(amount) > 0n) out[employee] = BigInt(amount)
+    if (employee && amount && uid && BigInt(amount) > 0n) out[employee] = { amount: BigInt(amount), uid }
   }
   return out
 }
 
-async function fetchSalaries(requestRecords: Wallet['requestRecords']): Promise<Record<string, bigint>> {
+async function fetchSalaries(requestRecords: Wallet['requestRecords']): Promise<Record<string, SalaryCfg>> {
   try {
     return parseSalaryConfigs(await requestRecords(HR_PROGRAM, true, 'unspent'))
   } catch {
@@ -131,7 +153,7 @@ function Console({ company, address, executeTransaction, requestRecords }: {
   executeTransaction: Wallet['executeTransaction']; requestRecords: Wallet['requestRecords']
 }) {
   const [roster, setRoster] = useState<Person[]>([])
-  const [salaries, setSalaries] = useState<Record<string, bigint>>({}) // 地址 → 薪资(base)，来自链上 SalaryConfig
+  const [salaries, setSalaries] = useState<Record<string, SalaryCfg>>({}) // 地址 → 薪资(base)+uid，来自链上 SalaryConfig
   const [paidIds, setPaidIds] = useState<Set<string>>(new Set())
   const [reveal, setReveal] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -145,8 +167,8 @@ function Console({ company, address, executeTransaction, requestRecords }: {
 
   // 某员工的薪资（人类值）；未设置/待上链则 undefined。
   const salaryOf = (e: Person): number | undefined => {
-    const base = salaries[e.walletAddress]
-    return base == null ? undefined : fromBase(base, company.decimals)
+    const cfg = salaries[e.walletAddress]
+    return cfg == null ? undefined : fromBase(cfg.amount, company.decimals)
   }
 
   const pending = useMemo(() => roster.filter((e) => !paidIds.has(e.id)), [roster, paidIds])
@@ -174,14 +196,15 @@ function Console({ company, address, executeTransaction, requestRecords }: {
     }
     setBusy(true)
     try {
-      const uid = await firstTokenUid(requestRecords)
-      if (!uid) {
-        toast.error('No payroll Token record', { description: `Mint ${company.symbol} to this wallet first (bootstrap.sh).` })
-        return
-      }
       // 补位到 4：多余槽用雇主自己地址 + amount 0（雇主拿到 0 额 Paystub，无害；不污染员工）。
       const tos = Array.from({ length: PAY_BATCH }, (_, i) => targets[i]?.walletAddress ?? address)
-      const amounts = Array.from({ length: PAY_BATCH }, (_, i) => (targets[i] ? salaries[targets[i].walletAddress] : 0n))
+      const amounts = Array.from({ length: PAY_BATCH }, (_, i) => (targets[i] ? salaries[targets[i].walletAddress].amount : 0n))
+      const need = amounts.reduce((s, a) => s + a, 0n)
+      const uid = await pickTokenUid(requestRecords, company.tokenId, need)
+      if (!uid) {
+        toast.error('No Token record covers this batch', { description: `Need a single unspent ${company.symbol} record ≥ the batch total — mint or consolidate first.` })
+        return
+      }
       const res = await executeTransaction(payBatchOpts(uid, tos, amounts, CURRENT_PERIOD))
       setPaidIds((s) => {
         const n = new Set(s)
@@ -211,11 +234,11 @@ function Console({ company, address, executeTransaction, requestRecords }: {
             </Button>
             <ImportCsv
               companyId={company.id} tokenId={company.tokenId} decimals={company.decimals}
-              executeTransaction={executeTransaction} onAdded={refresh}
+              salaries={salaries} executeTransaction={executeTransaction} onAdded={refresh}
             />
             <AddEmployee
               companyId={company.id} tokenId={company.tokenId} symbol={company.symbol} decimals={company.decimals}
-              executeTransaction={executeTransaction} onAdded={refresh}
+              salaries={salaries} executeTransaction={executeTransaction} onAdded={refresh}
             />
           </>
         }
@@ -344,8 +367,9 @@ function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   )
 }
 
-function AddEmployee({ companyId, tokenId, symbol, decimals, executeTransaction, onAdded }: {
+function AddEmployee({ companyId, tokenId, symbol, decimals, salaries, executeTransaction, onAdded }: {
   companyId: string; tokenId: string; symbol: string; decimals: number
+  salaries: Record<string, SalaryCfg>
   executeTransaction: Wallet['executeTransaction']; onAdded: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -367,7 +391,10 @@ function AddEmployee({ companyId, tokenId, symbol, decimals, executeTransaction,
       // 1) 后端只存身份（name/address），不含薪资。
       await addEmployee(companyId, { name, walletAddress: address })
       // 2) 薪资写成链上加密 SalaryConfig（只雇主能解，后端永不接触）。
-      await executeTransaction(setSalaryOpts(address, tokenId, toBase(Number(salary), decimals)))
+      //    已有配置 → update_salary 消费旧 record（防新旧并存按旧薪资发钱）；否则 set_salary。
+      const old = salaries[address]
+      const base = toBase(Number(salary), decimals)
+      await executeTransaction(old ? updateSalaryOpts(old.uid, base) : setSalaryOpts(address, tokenId, base))
       toast.success(`${name} added · salary sealed on-chain`)
       setName(''); setSalary(''); setAddress(''); setOpen(false)
       onAdded()
@@ -405,8 +432,9 @@ function AddEmployee({ companyId, tokenId, symbol, decimals, executeTransaction,
   )
 }
 
-function ImportCsv({ companyId, tokenId, decimals, executeTransaction, onAdded }: {
+function ImportCsv({ companyId, tokenId, decimals, salaries, executeTransaction, onAdded }: {
   companyId: string; tokenId: string; decimals: number
+  salaries: Record<string, SalaryCfg>
   executeTransaction: Wallet['executeTransaction']; onAdded: () => void
 }) {
   const [open, setOpen] = useState(false)
@@ -428,13 +456,21 @@ function ImportCsv({ companyId, tokenId, decimals, executeTransaction, onAdded }
   }
 
   // 身份逐个入后端（快、无钱包）；薪资按 8 人一笔 set_salary_batch 上链（审批次数 = ⌈N/8⌉）。
+  // 链上已有配置的行走 update_salary 消费旧 record（batch 只会新建，重导会造成新旧并存）。
   async function runImport() {
     if (!rows.length) return
     setBusy(true); setDone(0)
     let ok = 0
     try {
-      for (let i = 0; i < rows.length; i += SALARY_BATCH) {
-        const chunk = rows.slice(i, i + SALARY_BATCH)
+      const existing = rows.filter((r) => salaries[r.address])
+      const fresh = rows.filter((r) => !salaries[r.address])
+      for (const row of existing) {
+        await addEmployee(companyId, { name: row.name, walletAddress: row.address }) // 幂等，刷新姓名
+        await executeTransaction(updateSalaryOpts(salaries[row.address].uid, toBase(row.salary, decimals)))
+        ok += 1; setDone(ok)
+      }
+      for (let i = 0; i < fresh.length; i += SALARY_BATCH) {
+        const chunk = fresh.slice(i, i + SALARY_BATCH)
         for (const row of chunk) await addEmployee(companyId, { name: row.name, walletAddress: row.address })
         // 补位到 8：多余槽用本组第一个地址 + amount 0（读取端按 amount>0 过滤掉）。
         const pad = chunk[0].address

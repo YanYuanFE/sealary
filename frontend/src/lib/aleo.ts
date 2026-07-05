@@ -53,6 +53,20 @@ export function setSalaryOpts(employee: string, tokenId: string, amount: bigint)
   }
 }
 
+// update_salary(old: SalaryConfig, amount: u128) —— 消费旧配置产新配置。
+// 已有配置的员工必须走这里而不是 set_salary，否则新旧两条 record 并存、读取端谁后谁赢（可能按旧薪资发钱）。
+export function updateSalaryOpts(oldUid: string, amount: bigint): TransactionOptions {
+  return {
+    program: HR_PROGRAM,
+    function: 'update_salary',
+    inputs: [
+      { type: 'record', program: HR_PROGRAM, recordname: 'SalaryConfig', uid: oldUid },
+      `${amount}u128`,
+    ],
+    fee: FEE,
+  }
+}
+
 // set_salary_batch(token_id, employees: [address;8], amounts: [u128;8]) —— 一笔 tx 设最多 8 人。
 // employees/amounts 必须正好 8 项（调用方补位：多余槽用任意有效地址 + amount 0，读取端按 amount>0 过滤）。
 export const SALARY_BATCH = 8

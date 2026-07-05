@@ -1,7 +1,7 @@
 // 组织 / 花名册数据层 —— 调后端 /api（同源，Vercel functions；本地由 vite devApi 插件服务）。
 // 认证：认证钱包由 authHeaders() 携带（dev x-dev-wallet / prod SIWA JWT）。
 // §15 合规：链下不存工资金额【明文】——salary 与姓名一同在服务端 AES-256-GCM 加密存储。
-import { authHeaders } from './auth'
+import { authHeaders, authReady } from './auth'
 
 export type Company = {
   id: string
@@ -21,6 +21,7 @@ export type Person = {
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
+  await authReady() // 等 signIn 落定，避免 prod 下首个请求无 token 被 401
   const res = await fetch(`/api${path}`, {
     ...init,
     headers: { 'content-type': 'application/json', ...authHeaders(), ...(init?.headers ?? {}) },
