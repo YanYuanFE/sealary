@@ -13,25 +13,22 @@ import { SealedAmount } from '@/components/SealedAmount'
 import { ConnectButton } from '@/components/ConnectButton'
 import { Card } from '@/components/ui/card'
 import { shortAddr, money, period } from '@/lib/format'
-import { payOpts } from '@/lib/aleo'
+import { payOpts, setSalaryOpts, HR_PROGRAM } from '@/lib/aleo'
 import { toBase, fromBase } from '@/lib/units'
 import { getCompany, listEmployees, addEmployee, type Company, type Person } from '@/lib/api'
 
 const isAleoAddr = (a: string) => /^aleo1[a-z0-9]{58}$/.test(a)
 
-// 当前期数 YYYYMM（真实日期，替代 mock 常量）。
 const now = new Date()
 const CURRENT_PERIOD = now.getFullYear() * 100 + (now.getMonth() + 1)
 
 type Wallet = Pick<ReturnType<typeof useWallet>, 'requestRecords' | 'executeTransaction'>
 
-// 取雇主第一枚未花费的 registry Token（demo 里只持有该组织的薪资币）。
 async function firstTokenUid(requestRecords: Wallet['requestRecords']): Promise<string | undefined> {
   const recs = await requestRecords('token_registry.aleo', true, 'unspent')
   return (recs?.[0] as { uid?: string })?.uid
 }
 
-// 尽力从链上汇总未花费 Token 余额（base units → 人类值）。拿不到则返回 null（展示态降级）。
 async function fetchBalance(requestRecords: Wallet['requestRecords'], tokenId: string, decimals: number): Promise<number | null> {
   try {
     const recs = await requestRecords('token_registry.aleo', true, 'unspent')
@@ -45,6 +42,27 @@ async function fetchBalance(requestRecords: Wallet['requestRecords'], tokenId: s
     return fromBase(sum, decimals)
   } catch {
     return null
+  }
+}
+
+// 解析雇主自有的 SalaryConfig 加密 record → { 员工地址: 薪资(base units) }。
+// 薪资只在链上加密、只雇主能解——后端永不接触（PRIVACY_AUDIT 方案 D）。
+function parseSalaryConfigs(records: unknown[]): Record<string, bigint> {
+  const out: Record<string, bigint> = {}
+  for (const r of records) {
+    const s = JSON.stringify(r)
+    const employee = s.match(/employee:\s*(aleo1[a-z0-9]+)/)?.[1]
+    const amount = s.match(/amount:\s*(\d+)u128/)?.[1]
+    if (employee && amount) out[employee] = BigInt(amount)
+  }
+  return out
+}
+
+async function fetchSalaries(requestRecords: Wallet['requestRecords']): Promise<Record<string, bigint>> {
+  try {
+    return parseSalaryConfigs(await requestRecords(HR_PROGRAM, true, 'unspent'))
+  } catch {
+    return {}
   }
 }
 
@@ -92,6 +110,7 @@ function Console({ company, executeTransaction, requestRecords }: {
   executeTransaction: Wallet['executeTransaction']; requestRecords: Wallet['requestRecords']
 }) {
   const [roster, setRoster] = useState<Person[]>([])
+  const [salaries, setSalaries] = useState<Record<string, bigint>>({}) // 地址 → 薪资(base)，来自链上 SalaryConfig
   const [paidIds, setPaidIds] = useState<Set<string>>(new Set())
   const [reveal, setReveal] = useState(false)
   const [busy, setBusy] = useState(false)
@@ -99,23 +118,35 @@ function Console({ company, executeTransaction, requestRecords }: {
 
   useEffect(() => {
     listEmployees(company.id).then(setRoster).catch(() => setRoster([]))
-  }, [company.id])
-
-  useEffect(() => {
+    fetchSalaries(requestRecords).then(setSalaries).catch(() => setSalaries({}))
     fetchBalance(requestRecords, company.tokenId, company.decimals).then(setBalance)
-  }, [requestRecords, company.tokenId, company.decimals])
+  }, [company.id, requestRecords, company.tokenId, company.decimals])
+
+  // 某员工的薪资（人类值）；未设置/待上链则 undefined。
+  const salaryOf = (e: Person): number | undefined => {
+    const base = salaries[e.walletAddress]
+    return base == null ? undefined : fromBase(base, company.decimals)
+  }
 
   const pending = useMemo(() => roster.filter((e) => !paidIds.has(e.id)), [roster, paidIds])
-  const payTarget = useMemo(() => pending.find((e) => isAleoAddr(e.walletAddress)), [pending])
-  const payrollTotal = useMemo(() => roster.reduce((s, e) => s + e.salary, 0), [roster])
-  const pendingTotal = useMemo(() => pending.reduce((s, e) => s + e.salary, 0), [pending])
+  // 可发薪 = 未付 + 地址合法 + 链上已有薪资配置（否则不知道发多少）。
+  const payTarget = useMemo(
+    () => pending.find((e) => isAleoAddr(e.walletAddress) && salaries[e.walletAddress] != null),
+    [pending, salaries],
+  )
+  const sum = (list: Person[]) => list.reduce((s, e) => s + (salaryOf(e) ?? 0), 0)
+  const payrollTotal = sum(roster)
+  const pendingTotal = sum(pending)
 
-  function refresh() { listEmployees(company.id).then(setRoster).catch(() => {}) }
+  function refresh() {
+    listEmployees(company.id).then(setRoster).catch(() => {})
+    fetchSalaries(requestRecords).then(setSalaries).catch(() => {})
+  }
 
   async function runBatch() {
     const next = payTarget
     if (!next) {
-      toast.error('No payable employee', { description: 'Add an employee with a real aleo1… address first.' })
+      toast.error('No payable employee', { description: 'Add an employee (with a real address + salary) first.' })
       return
     }
     setBusy(true)
@@ -125,8 +156,8 @@ function Console({ company, executeTransaction, requestRecords }: {
         toast.error('No payroll Token record', { description: `Mint ${company.symbol} to this wallet first (bootstrap.sh).` })
         return
       }
-      // §4.2：人类值 → base units 上链，与 prove_income 的 threshold 同口径。
-      const res = await executeTransaction(payOpts(uid, next.walletAddress, toBase(next.salary, company.decimals), CURRENT_PERIOD))
+      // 薪资取自链上 SalaryConfig（已是 base units），直接付。
+      const res = await executeTransaction(payOpts(uid, next.walletAddress, salaries[next.walletAddress], CURRENT_PERIOD))
       setPaidIds((s) => new Set(s).add(next.id))
       toast.success(`Sealed pay → ${next.name}`, {
         description: (res?.transactionId ?? 'submitted') + (pending.length > 1 ? ' · run again for the next（链式发薪）' : ''),
@@ -143,13 +174,16 @@ function Console({ company, executeTransaction, requestRecords }: {
       <PageHeader
         eyebrow="Employer console"
         title="Run payroll, privately."
-        desc={`Pay ${company.name} in ${company.symbol}. Each salary moves as a private transfer and mints a sealed Paystub — bound to the same amount, atomically.`}
+        desc={`Pay ${company.name} in ${company.symbol}. Salaries live encrypted on-chain — the server never sees them. Each pay is a private transfer + a sealed Paystub.`}
         actions={
           <>
             <Button variant="outline" className="rounded-full" onClick={() => toast('Export coming with the backend')}>
               <Download className="size-4" /> Export
             </Button>
-            <AddEmployee companyId={company.id} token={company.symbol} onAdded={refresh} />
+            <AddEmployee
+              companyId={company.id} tokenId={company.tokenId} symbol={company.symbol} decimals={company.decimals}
+              executeTransaction={executeTransaction} onAdded={refresh}
+            />
           </>
         }
       />
@@ -161,13 +195,13 @@ function Console({ company, executeTransaction, requestRecords }: {
           </span>
         </StatCard>
         <StatCard label="Funded" hint={balance === null ? 'on-chain' : 'unspent balance'}>
-          {balance === null ? <SealedAmount amount={0} revealed={false} size="md" /> : <SealedAmount amount={balance} revealed={reveal} size="md" />}
+          {balance === null ? <SealedAmount amount={0} revealed={false} size="md" token={company.symbol} /> : <SealedAmount amount={balance} revealed={reveal} size="md" token={company.symbol} />}
         </StatCard>
         <StatCard label="This period" hint={`${roster.length} employees`}>
           {period(CURRENT_PERIOD)}
         </StatCard>
         <StatCard label="Pending" hint={`${pending.length} unpaid`}>
-          <SealedAmount amount={pendingTotal} revealed={reveal} size="md" />
+          <SealedAmount amount={pendingTotal} revealed={reveal} size="md" token={company.symbol} />
         </StatCard>
       </div>
 
@@ -175,7 +209,7 @@ function Console({ company, executeTransaction, requestRecords }: {
         <div className="flex items-center justify-between border-b border-border/70 px-5 py-4">
           <div>
             <h2 className="font-heading text-lg font-semibold">Roster</h2>
-            <p className="text-sm text-muted-foreground">Salaries are sealed PII — encrypted at rest, never public.</p>
+            <p className="text-sm text-muted-foreground">Salaries are encrypted on-chain (only you can decrypt) — never stored on the server.</p>
           </div>
           <div className="flex items-center gap-2">
             <Button variant="ghost" size="sm" className="rounded-full" onClick={() => setReveal((v) => !v)}>
@@ -199,20 +233,27 @@ function Console({ company, executeTransaction, requestRecords }: {
               </tr>
             </thead>
             <tbody>
-              {roster.map((e) => (
-                <tr key={e.id} className="border-b border-border/50 last:border-0 hover:bg-secondary/40">
-                  <td className="px-5 py-3.5">
-                    <div className="font-medium text-foreground">{e.name}</div>
-                  </td>
-                  <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">{shortAddr(e.walletAddress)}</td>
-                  <td className="px-5 py-3.5 text-right"><SealedAmount amount={e.salary} revealed={reveal} size="sm" /></td>
-                  <td className="px-5 py-3.5 text-right">
-                    {paidIds.has(e.id)
-                      ? <Badge variant="outline" className="border-proven/30 bg-proven-soft/50 text-proven">Paid</Badge>
-                      : <Badge variant="outline" className="text-muted-foreground">Pending</Badge>}
-                  </td>
-                </tr>
-              ))}
+              {roster.map((e) => {
+                const s = salaryOf(e)
+                return (
+                  <tr key={e.id} className="border-b border-border/50 last:border-0 hover:bg-secondary/40">
+                    <td className="px-5 py-3.5">
+                      <div className="font-medium text-foreground">{e.name}</div>
+                    </td>
+                    <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">{shortAddr(e.walletAddress)}</td>
+                    <td className="px-5 py-3.5 text-right">
+                      {s == null
+                        ? <span className="font-mono text-xs text-muted-foreground">— sealing…</span>
+                        : <SealedAmount amount={s} revealed={reveal} size="sm" token={company.symbol} />}
+                    </td>
+                    <td className="px-5 py-3.5 text-right">
+                      {paidIds.has(e.id)
+                        ? <Badge variant="outline" className="border-proven/30 bg-proven-soft/50 text-proven">Paid</Badge>
+                        : <Badge variant="outline" className="text-muted-foreground">Pending</Badge>}
+                    </td>
+                  </tr>
+                )
+              })}
             </tbody>
           </table>
         )}
@@ -270,11 +311,15 @@ function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   )
 }
 
-function AddEmployee({ companyId, token, onAdded }: { companyId: string; token: string; onAdded: () => void }) {
+function AddEmployee({ companyId, tokenId, symbol, decimals, executeTransaction, onAdded }: {
+  companyId: string; tokenId: string; symbol: string; decimals: number
+  executeTransaction: Wallet['executeTransaction']; onAdded: () => void
+}) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
   const [salary, setSalary] = useState('')
   const [address, setAddress] = useState('')
+  const [busy, setBusy] = useState(false)
 
   const validAddr = isAleoAddr(address)
 
@@ -284,13 +329,19 @@ function AddEmployee({ companyId, token, onAdded }: { companyId: string; token: 
       toast.error('Invalid Aleo address', { description: 'Paste the employee’s real aleo1… address to pay on-chain.' })
       return
     }
+    setBusy(true)
     try {
-      await addEmployee(companyId, { name, walletAddress: address, salary: Number(salary) })
-      toast.success(`${name} added to roster`)
+      // 1) 后端只存身份（name/address），不含薪资。
+      await addEmployee(companyId, { name, walletAddress: address })
+      // 2) 薪资写成链上加密 SalaryConfig（只雇主能解，后端永不接触）。
+      await executeTransaction(setSalaryOpts(address, tokenId, toBase(Number(salary), decimals)))
+      toast.success(`${name} added · salary sealed on-chain`)
       setName(''); setSalary(''); setAddress(''); setOpen(false)
       onAdded()
     } catch (e) {
       toast.error('Add failed', { description: String((e as Error)?.message ?? e) })
+    } finally {
+      setBusy(false)
     }
   }
 
@@ -302,7 +353,7 @@ function AddEmployee({ companyId, token, onAdded }: { companyId: string; token: 
       <DialogContent>
         <DialogHeader>
           <DialogTitle className="font-heading text-xl">Add employee</DialogTitle>
-          <DialogDescription>Name and salary are sealed PII — encrypted at rest, never on public state.</DialogDescription>
+          <DialogDescription>Name is encrypted PII; the salary is sealed on-chain and never touches the server.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <Field label="Name"><input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Jordan Lee" /></Field>
@@ -310,11 +361,11 @@ function AddEmployee({ companyId, token, onAdded }: { companyId: string; token: 
             <input className="field font-mono text-xs" value={address} onChange={(e) => setAddress(e.target.value.trim())} placeholder="aleo1…" />
             {address && !validAddr && <span className="mt-1 block text-xs text-destructive">Not a valid aleo1… address</span>}
           </Field>
-          <Field label={`Monthly salary (${token})`}><input className="field font-mono" value={salary} onChange={(e) => setSalary(e.target.value.replace(/[^0-9]/g, ''))} placeholder="12000" inputMode="numeric" /></Field>
+          <Field label={`Monthly salary (${symbol})`}><input className="field font-mono" value={salary} onChange={(e) => setSalary(e.target.value.replace(/[^0-9]/g, ''))} placeholder="12000" inputMode="numeric" /></Field>
         </div>
         <DialogFooter>
           <Button variant="outline" className="rounded-full" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button className="rounded-full" onClick={submit}>Seal & add</Button>
+          <Button className="rounded-full" onClick={submit} disabled={busy}>{busy ? 'Sealing…' : 'Seal & add'}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

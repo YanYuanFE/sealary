@@ -3,7 +3,7 @@ import { sql } from './_lib/db.js'
 import { authWallet } from './_lib/siwa.js'
 import { unwrapKey, decryptPII } from './_lib/crypto.js'
 
-type Pii = { name: string; salary: number }
+type Pii = { name: string } // 薪资不进后端（PRIVACY_AUDIT）
 
 // GET → 当前登录钱包对应的员工身份 + 所属公司（解密 PII）。未入职则 null。
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -25,7 +25,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const r = rows[0]
   const pii = decryptPII<Pii>(r.pii_ciphertext as Buffer, unwrapKey(r.wrapped_key as Buffer))
   return res.json({
-    person: { id: r.id, walletAddress: r.wallet_address, name: pii.name, salary: pii.salary },
+    person: { id: r.id, walletAddress: r.wallet_address, name: pii.name },
     company: { id: r.company_id, name: r.company_name, symbol: r.symbol, decimals: r.decimals, tokenId: r.token_id },
   })
 }

@@ -1,0 +1,9 @@
+{
+  "program": "sealary_hr.aleo",
+  "version": "0.1.0",
+  "description": "Employer-private encrypted salary config (backend never sees salary).",
+  "license": "MIT",
+  "leo": "4.2.0",
+  "dependencies": null,
+  "dev_dependencies": null
+}

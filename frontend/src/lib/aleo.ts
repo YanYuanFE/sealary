@@ -4,8 +4,9 @@ import { DecryptPermission } from '@provablehq/aleo-wallet-adaptor-core'
 // ── 链上配置 ──────────────────────────────────────────────
 export const NETWORK = Network.TESTNET
 export const PROGRAM = 'sealary_pay.aleo'
+export const HR_PROGRAM = 'sealary_hr.aleo' // 雇主私有薪资配置（加密 record，后端不存薪资）
 export const DECRYPT = DecryptPermission.UponRequest
-export const CONNECT_PROGRAMS = [PROGRAM, 'token_registry.aleo']
+export const CONNECT_PROGRAMS = [PROGRAM, HR_PROGRAM, 'token_registry.aleo']
 
 // REST 查询端点（链上只读：mapping / program）。
 export const ENDPOINT = 'https://api.explorer.provable.com/v1'
@@ -37,6 +38,17 @@ export function discloseOpts(paystubUid: string): TransactionOptions {
     program: PROGRAM,
     function: 'disclose',
     inputs: [{ type: 'record', program: PROGRAM, recordname: 'Paystub', uid: paystubUid }],
+    fee: FEE,
+  }
+}
+
+// set_salary(employee: address, token_id: field, amount: u128) —— 产出加密 SalaryConfig（owner=雇主）。
+// amount 为 base units；薪资只上链（加密），绝不发后端。
+export function setSalaryOpts(employee: string, tokenId: string, amount: bigint): TransactionOptions {
+  return {
+    program: HR_PROGRAM,
+    function: 'set_salary',
+    inputs: [employee, tokenId, `${amount}u128`],
     fee: FEE,
   }
 }

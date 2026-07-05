@@ -23,6 +23,7 @@
 - [x] **后端**（`frontend/api/`，与前端同 Vercel 项目）：schema（5 表）+ 服务端 AES-256-GCM PII 加密（自检 4/4）+ crypto-shred + companies/employees/me/persons handlers。**Neon 已建、本地端到端验通**
 - [x] **本地 API 调试**：vite `devApi()` 插件把 `api/*.ts` 挂进 dev server（`npm run dev` 同时跑前端+API，无需 vercel dev）；`db-push.mjs` 免 psql 建表；`ALLOW_DEV_AUTH` + `x-dev-wallet` 头 dev 免签名
 - [x] **前端接后端**：`lib/api.ts` 改 async fetch(`/api`)，CreateOrg/Employer/Employee 改 useEffect+state；`lib/auth.ts` 管会话（dev x-dev-wallet / prod SIWA JWT），AppShell 连钱包即 signIn
+- [x] **隐私审计 + 方案 D**（`PRIVACY_AUDIT.md`）：对标 Zama 薪资获奖项目（DripPay/Paychain），发现"薪资明文经后端"是唯一实质差距 → 薪资改为链上加密 `sealary_hr.aleo/SalaryConfig`（雇主自有 record，后端零参与）。合约已部署（tx `at1ejh7qje…`）+ `set_salary` 链上验证；后端 salary 全移除；前端加员工链上写/花名册链上读/发薪用链上金额
 
 ---
 

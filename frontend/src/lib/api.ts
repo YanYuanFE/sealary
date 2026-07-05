@@ -12,11 +12,12 @@ export type Company = {
   decimals: number
 }
 
+// 后端只存身份 PII（name/address）——薪资绝不进后端（隐私红线，见 PRIVACY_AUDIT）。
+// 薪资在链上加密 record sealary_hr.aleo/SalaryConfig（雇主自有），前端另行读取。
 export type Person = {
   id: string
   name: string
   walletAddress: string
-  salary: number // 人类单位；发薪时经 toBase(salary, company.decimals) 上链
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
