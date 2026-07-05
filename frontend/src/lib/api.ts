@@ -13,7 +13,7 @@ export type Company = {
 }
 
 // 后端只存身份 PII（name/address）——薪资绝不进后端（隐私红线，见 PRIVACY_AUDIT）。
-// 薪资在链上加密 record sealary_hr.aleo/SalaryConfig（雇主自有），前端另行读取。
+// 薪资在链上加密 record sealary_conf.aleo/SalaryConfig（雇主自有），前端另行读取。
 export type Person = {
   id: string
   name: string

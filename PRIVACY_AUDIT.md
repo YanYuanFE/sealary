@@ -61,12 +61,13 @@ Zama 项目的硬约束:**金额在客户端加密 → 链上以密文存储/计
 
 ### P0 — 薪资不进后端(达红线,方案 D)—— ✅ 已实现
 
-> 状态:**已落地并验证**。`sealary_hr.aleo` 已部署 testnet(tx `at1ejh7qje…`);`set_salary` 链上执行确认产出加密
-> SalaryConfig(tx `at1knn4zlw…`);后端 `salary` 全移除,强塞也被丢弃;前端加员工链上写、花名册链上读解、发薪用链上金额;build+typecheck 全绿。
+> 状态:**已落地并验证**。`sealary_conf.aleo` 已部署 testnet(tx `at1flh8kex…`);`set_salary`(单条)+ `set_salary_batch`
+> (8 人一笔,tx `at1450n8fz…`)链上执行确认产出加密 SalaryConfig;后端 `salary` 全移除,强塞也被丢弃;
+> 前端加员工链上写、CSV 导入走 batch、花名册链上读解、发薪用链上金额;build+typecheck 全绿。
 
 薪资改为**链上加密、雇主自有 record**,后端**彻底不存薪资**。对标 DripPay 的"加密薪资上链"。
 
-- **合约**:新增独立小程序 `sealary_hr.aleo`(不动已部署的 `sealary_pay.aleo`):
+- **合约**:新增独立小程序 `sealary_conf.aleo`(不动已部署的 `sealary_pay.aleo`):
   ```leo
   record SalaryConfig { owner: address /*雇主*/, employee: address, token_id: field, amount: u128 }
   fn set_salary(employee, token_id, amount) -> SalaryConfig   // owner = self.signer
@@ -75,10 +76,10 @@ Zama 项目的硬约束:**金额在客户端加密 → 链上以密文存储/计
   只雇主的 view key 能解密自己的 `SalaryConfig`;服务器永远看不到。
 - **前端(Employer)**:
   - 加员工 = 后端存 `{name, address}`(无薪资)+ 链上 `executeTransaction(set_salary(address, tokenId, toBase(salary,decimals)))`。
-  - 花名册 = `requestRecords('sealary_hr.aleo','unspent')` 解密 `SalaryConfig`,按地址匹配员工,`fromBase` 展示。
+  - 花名册 = `requestRecords('sealary_conf.aleo','unspent')` 解密 `SalaryConfig`,按地址匹配员工,`fromBase` 展示。
   - 发薪 = 用解密出的 `SalaryConfig.amount`。
 - **后端**:`Person` 去掉 `salary`;`Pii` 只剩 `{name}`;`employees`/`me` handler 不再收/存/返 salary。
-- **部署**:`leo deploy sealary_hr.aleo`(名 10 字符→命名空间费 ~1 credit,总 ~6 credits;余额 13.6 够)。
+- **部署**:`leo deploy sealary_conf.aleo`(名 10 字符→命名空间费 ~1 credit,总 ~6 credits;余额 13.6 够)。
 
 ### P1 — 文档如实标注 disclose 的公开性(不改代码)
 
@@ -86,7 +87,7 @@ Zama 项目的硬约束:**金额在客户端加密 → 链上以密文存储/计
 
 ### P2 — prove_income 绑定验证者 + nonce(防复用/借用)
 
-见 BACKEND_PLAN §6 决策 3。改合约(sealary_pay 需重部署,或放 sealary_hr 同批)。产品硬化。
+见 BACKEND_PLAN §6 决策 3。改合约(sealary_pay 需重部署,或放 sealary_conf 同批)。产品硬化。
 
 ### P3(可选) — 姓名客户端加密
 
@@ -96,7 +97,7 @@ Zama 项目的硬约束:**金额在客户端加密 → 链上以密文存储/计
 
 ## 6. 实施顺序(本次)
 
-1. `sealary_hr.aleo`:写合约 → `leo build` → `leo deploy`(已起草 `contract/sealary_hr/`)。
+1. `sealary_conf.aleo`:写合约 → `leo build` → `leo deploy`(已起草 `contract/sealary_conf/`)。
 2. 后端:`employees.ts`/`me.ts`/`api.ts` 移除 salary,`Pii={name}`。
 3. 前端 `lib/aleo.ts`:加 `HR_PROGRAM` + `setSalaryOpts`。
 4. 前端 `Employer.tsx`:加员工写 SalaryConfig;花名册读解 SalaryConfig;发薪用其金额。

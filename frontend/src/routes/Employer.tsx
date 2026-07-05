@@ -13,7 +13,7 @@ import { SealedAmount } from '@/components/SealedAmount'
 import { ConnectButton } from '@/components/ConnectButton'
 import { Card } from '@/components/ui/card'
 import { shortAddr, money, period } from '@/lib/format'
-import { payOpts, setSalaryOpts, HR_PROGRAM } from '@/lib/aleo'
+import { payOpts, setSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM } from '@/lib/aleo'
 import { toBase, fromBase } from '@/lib/units'
 import { getCompany, listEmployees, addEmployee, type Company, type Person } from '@/lib/api'
 
@@ -73,7 +73,8 @@ function parseSalaryConfigs(records: unknown[]): Record<string, bigint> {
     const s = JSON.stringify(r)
     const employee = s.match(/employee:\s*(aleo1[a-z0-9]+)/)?.[1]
     const amount = s.match(/amount:\s*(\d+)u128/)?.[1]
-    if (employee && amount) out[employee] = BigInt(amount)
+    // amount>0 过滤掉 batch 的补位项（amount=0）。
+    if (employee && amount && BigInt(amount) > 0n) out[employee] = BigInt(amount)
   }
   return out
 }
@@ -418,22 +419,29 @@ function ImportCsv({ companyId, tokenId, decimals, executeTransaction, onAdded }
     })
   }
 
-  // 身份后端批量加；薪资逐笔上链（每人一次钱包审批——Aleo 无 bulk-tx）。
+  // 身份逐个入后端（快、无钱包）；薪资按 8 人一笔 set_salary_batch 上链（审批次数 = ⌈N/8⌉）。
   async function runImport() {
     if (!rows.length) return
     setBusy(true); setDone(0)
     let ok = 0
-    for (const row of rows) {
-      try {
-        await addEmployee(companyId, { name: row.name, walletAddress: row.address })
-        await executeTransaction(setSalaryOpts(row.address, tokenId, toBase(row.salary, decimals)))
-        ok++; setDone(ok)
-      } catch (e) {
-        toast.error(`${row.name} failed`, { description: String((e as Error)?.message ?? e) })
+    try {
+      for (let i = 0; i < rows.length; i += SALARY_BATCH) {
+        const chunk = rows.slice(i, i + SALARY_BATCH)
+        for (const row of chunk) await addEmployee(companyId, { name: row.name, walletAddress: row.address })
+        // 补位到 8：多余槽用本组第一个地址 + amount 0（读取端按 amount>0 过滤掉）。
+        const pad = chunk[0].address
+        const employees = Array.from({ length: SALARY_BATCH }, (_, j) => chunk[j]?.address ?? pad)
+        const amounts = Array.from({ length: SALARY_BATCH }, (_, j) => (chunk[j] ? toBase(chunk[j].salary, decimals) : 0n))
+        await executeTransaction(setSalaryBatchOpts(employees, amounts, tokenId))
+        ok += chunk.length; setDone(ok)
       }
+      toast.success(`Imported ${ok}/${rows.length} · salaries sealed on-chain`)
+      reset(); setOpen(false); onAdded()
+    } catch (e) {
+      toast.error('Import failed', { description: String((e as Error)?.message ?? e) })
+    } finally {
+      setBusy(false)
     }
-    toast.success(`Imported ${ok}/${rows.length} · salaries sealed on-chain`)
-    setBusy(false); reset(); setOpen(false); onAdded()
   }
 
   return (
@@ -446,7 +454,7 @@ function ImportCsv({ companyId, tokenId, decimals, executeTransaction, onAdded }
           <DialogTitle className="font-heading text-xl">Import employees (CSV)</DialogTitle>
           <DialogDescription>
             Columns <span className="font-mono text-xs">name,address,salary</span> — one per line (header optional).
-            Identity is added in one pass; each salary is sealed on-chain, so expect one wallet approval per employee.
+            Identity is added in one pass; salaries are sealed on-chain in batches of {SALARY_BATCH} — about one wallet approval per {SALARY_BATCH} employees.
           </DialogDescription>
         </DialogHeader>
         <input type="file" accept=".csv,text/csv" onChange={onFile} disabled={busy} className="field" />

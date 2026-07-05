@@ -23,7 +23,8 @@
 - [x] **后端**（`frontend/api/`，与前端同 Vercel 项目）：schema（5 表）+ 服务端 AES-256-GCM PII 加密（自检 4/4）+ crypto-shred + companies/employees/me/persons handlers。**Neon 已建、本地端到端验通**
 - [x] **本地 API 调试**：vite `devApi()` 插件把 `api/*.ts` 挂进 dev server（`npm run dev` 同时跑前端+API，无需 vercel dev）；`db-push.mjs` 免 psql 建表；`ALLOW_DEV_AUTH` + `x-dev-wallet` 头 dev 免签名
 - [x] **前端接后端**：`lib/api.ts` 改 async fetch(`/api`)，CreateOrg/Employer/Employee 改 useEffect+state；`lib/auth.ts` 管会话（dev x-dev-wallet / prod SIWA JWT），AppShell 连钱包即 signIn
-- [x] **隐私审计 + 方案 D**（`PRIVACY_AUDIT.md`）：对标 Zama 薪资获奖项目（DripPay/Paychain），发现"薪资明文经后端"是唯一实质差距 → 薪资改为链上加密 `sealary_hr.aleo/SalaryConfig`（雇主自有 record，后端零参与）。合约已部署（tx `at1ejh7qje…`）+ `set_salary` 链上验证；后端 salary 全移除；前端加员工链上写/花名册链上读/发薪用链上金额
+- [x] **隐私审计 + 方案 D**（`PRIVACY_AUDIT.md`）：对标 Zama 薪资获奖项目（DripPay/Paychain），发现"薪资明文经后端"是唯一实质差距 → 薪资改为链上加密 `sealary_conf.aleo/SalaryConfig`（雇主自有 record，后端零参与）。合约部署 tx `at1flh8kex…`；后端 salary 全移除（强塞也丢弃）；前端加员工链上写/花名册链上读/发薪用链上金额
+- [x] **薪资批量 `set_salary_batch`**（`sealary_conf.aleo`）：定长 8 + 补位（amount>0 过滤），一笔 tx 设 8 人 → CSV 导入审批数从 N 降到 ⌈N/8⌉。链上实测 tx `at1450n8fz…`（费 0.0048）
 
 ---
 
@@ -46,7 +47,7 @@
 
 - [x] Employer 发薪接 `payOpts`/`executeTransaction`（取未花费 zUSD Token uid 作 input；连钱包时**单笔链式**发下一个地址合法的员工，seed 假地址自动跳过；AddEmployee 支持粘贴真实地址）。金额用人类单位未按 decimals 缩放（与 threshold 同单位）。待真机验证
 - [x] Verify 页接真实证明流（读 `prove_income` 公开输出，展示雇主/代币，校验来源）
-- [x] CSV 批量导入员工（`name,address,salary` 每行）：身份后端批量加、薪资逐笔上链（Aleo 无 bulk-tx → 每人一次审批），带进度 + 无效行跳过。解析器自检 5/5
+- [x] CSV 批量导入员工（`name,address,salary` 每行）：身份后端批量加、薪资走 `set_salary_batch`（8 人一笔），带进度 + 无效行跳过。解析器自检 5/5
 - [~] 空态/错误态：未连钱包/未建组织/无 Paystub/token 校验失败 已覆盖；交易失败 toast 已覆盖
 - [ ] Employer 「发行薪资币」UI（可选，把 bootstrap 的 register_token/mint 搬进前端；当前用脚本）
 - [ ] 交易状态轮询（pending/finalized）+ 成功后刷新 records（现为乐观更新）

@@ -4,7 +4,7 @@ import { DecryptPermission } from '@provablehq/aleo-wallet-adaptor-core'
 // ── 链上配置 ──────────────────────────────────────────────
 export const NETWORK = Network.TESTNET
 export const PROGRAM = 'sealary_pay.aleo'
-export const HR_PROGRAM = 'sealary_hr.aleo' // 雇主私有薪资配置（加密 record，后端不存薪资）
+export const HR_PROGRAM = 'sealary_conf.aleo' // 雇主私有薪资配置（加密 record，后端不存薪资）
 export const DECRYPT = DecryptPermission.UponRequest
 export const CONNECT_PROGRAMS = [PROGRAM, HR_PROGRAM, 'token_registry.aleo']
 
@@ -51,6 +51,15 @@ export function setSalaryOpts(employee: string, tokenId: string, amount: bigint)
     inputs: [employee, tokenId, `${amount}u128`],
     fee: FEE,
   }
+}
+
+// set_salary_batch(token_id, employees: [address;8], amounts: [u128;8]) —— 一笔 tx 设最多 8 人。
+// employees/amounts 必须正好 8 项（调用方补位：多余槽用任意有效地址 + amount 0，读取端按 amount>0 过滤）。
+export const SALARY_BATCH = 8
+export function setSalaryBatchOpts(employees: string[], amounts: bigint[], tokenId: string): TransactionOptions {
+  const emp = `[${employees.join(', ')}]`
+  const amt = `[${amounts.map((a) => `${a}u128`).join(', ')}]`
+  return { program: HR_PROGRAM, function: 'set_salary_batch', inputs: [tokenId, emp, amt], fee: FEE }
 }
 
 // pay(input: token_registry Token, to, amount: u128, period: u32)
