@@ -46,6 +46,7 @@
 
 - [x] Employer 发薪接 `payOpts`/`executeTransaction`（取未花费 zUSD Token uid 作 input；连钱包时**单笔链式**发下一个地址合法的员工，seed 假地址自动跳过；AddEmployee 支持粘贴真实地址）。金额用人类单位未按 decimals 缩放（与 threshold 同单位）。待真机验证
 - [x] Verify 页接真实证明流（读 `prove_income` 公开输出，展示雇主/代币，校验来源）
+- [x] CSV 批量导入员工（`name,address,salary` 每行）：身份后端批量加、薪资逐笔上链（Aleo 无 bulk-tx → 每人一次审批），带进度 + 无效行跳过。解析器自检 5/5
 - [~] 空态/错误态：未连钱包/未建组织/无 Paystub/token 校验失败 已覆盖；交易失败 toast 已覆盖
 - [ ] Employer 「发行薪资币」UI（可选，把 bootstrap 的 register_token/mint 搬进前端；当前用脚本）
 - [ ] 交易状态轮询（pending/finalized）+ 成功后刷新 records（现为乐观更新）

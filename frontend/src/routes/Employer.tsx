@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { toast } from 'sonner'
-import { Eye, EyeOff, Send, UserPlus, Download, Coins, Building2, Loader2 } from 'lucide-react'
+import { Eye, EyeOff, Send, UserPlus, Upload, Download, Coins, Building2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -18,6 +18,26 @@ import { toBase, fromBase } from '@/lib/units'
 import { getCompany, listEmployees, addEmployee, type Company, type Person } from '@/lib/api'
 
 const isAleoAddr = (a: string) => /^aleo1[a-z0-9]{58}$/.test(a)
+
+type CsvRow = { name: string; address: string; salary: number }
+
+// 解析 CSV：每行 name,address,salary（可含表头）。
+// ponytail: 简易解析（逗号分列），姓名含逗号的边界不处理——demo 够用；要严谨换 CSV 库。
+function parseCsv(text: string): { rows: CsvRow[]; errors: string[] } {
+  const rows: CsvRow[] = []
+  const errors: string[] = []
+  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean)
+  lines.forEach((line, i) => {
+    const [name, address, salaryStr] = line.split(',').map((p) => p.trim())
+    if (i === 0 && !isAleoAddr(address ?? '')) return // 跳过表头
+    if (!name || !isAleoAddr(address ?? '') || !/^\d+$/.test(salaryStr ?? '')) {
+      errors.push(`Line ${i + 1}: ${line}`)
+      return
+    }
+    rows.push({ name, address, salary: Number(salaryStr) })
+  })
+  return { rows, errors }
+}
 
 const now = new Date()
 const CURRENT_PERIOD = now.getFullYear() * 100 + (now.getMonth() + 1)
@@ -180,6 +200,10 @@ function Console({ company, executeTransaction, requestRecords }: {
             <Button variant="outline" className="rounded-full" onClick={() => toast('Export coming with the backend')}>
               <Download className="size-4" /> Export
             </Button>
+            <ImportCsv
+              companyId={company.id} tokenId={company.tokenId} decimals={company.decimals}
+              executeTransaction={executeTransaction} onAdded={refresh}
+            />
             <AddEmployee
               companyId={company.id} tokenId={company.tokenId} symbol={company.symbol} decimals={company.decimals}
               executeTransaction={executeTransaction} onAdded={refresh}
@@ -366,6 +390,78 @@ function AddEmployee({ companyId, tokenId, symbol, decimals, executeTransaction,
         <DialogFooter>
           <Button variant="outline" className="rounded-full" onClick={() => setOpen(false)}>Cancel</Button>
           <Button className="rounded-full" onClick={submit} disabled={busy}>{busy ? 'Sealing…' : 'Seal & add'}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+function ImportCsv({ companyId, tokenId, decimals, executeTransaction, onAdded }: {
+  companyId: string; tokenId: string; decimals: number
+  executeTransaction: Wallet['executeTransaction']; onAdded: () => void
+}) {
+  const [open, setOpen] = useState(false)
+  const [rows, setRows] = useState<CsvRow[]>([])
+  const [errors, setErrors] = useState<string[]>([])
+  const [busy, setBusy] = useState(false)
+  const [done, setDone] = useState(0)
+
+  function reset() { setRows([]); setErrors([]); setDone(0) }
+
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0]
+    if (!file) return
+    file.text().then((text) => {
+      const parsed = parseCsv(text)
+      setRows(parsed.rows); setErrors(parsed.errors); setDone(0)
+      if (parsed.rows.length === 0) toast.error('No valid rows', { description: 'Expected: name,address,salary per line.' })
+    })
+  }
+
+  // 身份后端批量加；薪资逐笔上链（每人一次钱包审批——Aleo 无 bulk-tx）。
+  async function runImport() {
+    if (!rows.length) return
+    setBusy(true); setDone(0)
+    let ok = 0
+    for (const row of rows) {
+      try {
+        await addEmployee(companyId, { name: row.name, walletAddress: row.address })
+        await executeTransaction(setSalaryOpts(row.address, tokenId, toBase(row.salary, decimals)))
+        ok++; setDone(ok)
+      } catch (e) {
+        toast.error(`${row.name} failed`, { description: String((e as Error)?.message ?? e) })
+      }
+    }
+    toast.success(`Imported ${ok}/${rows.length} · salaries sealed on-chain`)
+    setBusy(false); reset(); setOpen(false); onAdded()
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset() }}>
+      <DialogTrigger asChild>
+        <Button variant="outline" className="rounded-full"><Upload className="size-4" /> Import CSV</Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="font-heading text-xl">Import employees (CSV)</DialogTitle>
+          <DialogDescription>
+            Columns <span className="font-mono text-xs">name,address,salary</span> — one per line (header optional).
+            Identity is added in one pass; each salary is sealed on-chain, so expect one wallet approval per employee.
+          </DialogDescription>
+        </DialogHeader>
+        <input type="file" accept=".csv,text/csv" onChange={onFile} disabled={busy} className="field" />
+        {(rows.length > 0 || errors.length > 0) && (
+          <div className="rounded-lg border border-border bg-secondary/40 p-3 text-sm">
+            <Row k="Valid rows" v={String(rows.length)} />
+            {errors.length > 0 && <Row k="Skipped (invalid)" v={String(errors.length)} />}
+            {busy && <Row k="Sealed" v={`${done}/${rows.length}`} mono />}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="outline" className="rounded-full" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
+          <Button className="rounded-full" onClick={runImport} disabled={busy || rows.length === 0}>
+            <Upload className="size-4" /> {busy ? `Sealing ${done}/${rows.length}…` : `Import ${rows.length || ''}`.trim()}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
