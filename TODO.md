@@ -50,6 +50,7 @@
 - [x] CSV 批量导入员工（`name,address,salary` 每行）：身份后端批量加、薪资走 `set_salary_batch`（8 人一笔），带进度 + 无效行跳过。解析器自检 5/5
 - [~] 空态/错误态：未连钱包/未建组织/无 Paystub/token 校验失败 已覆盖；交易失败 toast 已覆盖
 - [ ] Employer 「发行薪资币」UI（可选，把 bootstrap 的 register_token/mint 搬进前端；当前用脚本）
+- [~] **批量发薪 `pay_batch`**（K=4：一笔发 4 人，链式复用找零，免"等找零 finalize"串行）：合约已写入 `contract/sealary/src/main.leo` 并编译验证（4 调用/10 输出在上限内）。**待重部署**（sealary_pay @noupgrade → 需改名 + credits）+ CLI 真机验（chaining 的 finalize 对 ext_auth=false 应良性，需实测确认）+ 前端接线。**当前余额不足，等 faucet**
 - [ ] 交易状态轮询（pending/finalized）+ 成功后刷新 records（现为乐观更新）
 
 ## P1 · 后端与合规（TECH_DESIGN §15；脚手架已落 `frontend/api/`（与前端同项目），见 BACKEND_PLAN）

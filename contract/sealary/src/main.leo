@@ -53,6 +53,34 @@ program sealary_pay.aleo {
         return (change, recv, stub, final { settle(f); });
     }
 
+    // 组合 4 个外部 transfer_private 的 Final。
+    final fn settle4(f0: Final, f1: Final, f2: Final, f3: Final) {
+        f0.run();
+        f1.run();
+        f2.run();
+        f3.run();
+    }
+
+    // 批量发薪（一笔 tx 发最多 4 人）：链式复用找零，产出 4 到账 + 4 Paystub + 最终找零。
+    // 免掉逐笔"等找零 finalize"的串行，一次审批发一批。不足 4 人由前端补位（to=任意有效地址, amount=0）。
+    fn pay_batch(input: token_registry.aleo::Token, tos: [address; 4], amounts: [u128; 4], period: u32)
+        -> (token_registry.aleo::Token, token_registry.aleo::Token, token_registry.aleo::Token, token_registry.aleo::Token, token_registry.aleo::Token, Paystub, Paystub, Paystub, Paystub, Final) {
+        let tid: field = input.token_id;
+        let (c0, r0, f0): (token_registry.aleo::Token, token_registry.aleo::Token, Final) =
+            token_registry.aleo::transfer_private(tos[0u8], amounts[0u8], input);
+        let (c1, r1, f1): (token_registry.aleo::Token, token_registry.aleo::Token, Final) =
+            token_registry.aleo::transfer_private(tos[1u8], amounts[1u8], c0);
+        let (c2, r2, f2): (token_registry.aleo::Token, token_registry.aleo::Token, Final) =
+            token_registry.aleo::transfer_private(tos[2u8], amounts[2u8], c1);
+        let (c3, r3, f3): (token_registry.aleo::Token, token_registry.aleo::Token, Final) =
+            token_registry.aleo::transfer_private(tos[3u8], amounts[3u8], c2);
+        let s0: Paystub = Paystub { owner: tos[0u8], employer: self.signer, token_id: tid, amount: amounts[0u8], period: period };
+        let s1: Paystub = Paystub { owner: tos[1u8], employer: self.signer, token_id: tid, amount: amounts[1u8], period: period };
+        let s2: Paystub = Paystub { owner: tos[2u8], employer: self.signer, token_id: tid, amount: amounts[2u8], period: period };
+        let s3: Paystub = Paystub { owner: tos[3u8], employer: self.signer, token_id: tid, amount: amounts[3u8], period: period };
+        return (c3, r0, r1, r2, r3, s0, s1, s2, s3, final { settle4(f0, f1, f2, f3); });
+    }
+
     // 收入证明：输入私有凭证 + 公开门槛，公开输出 等级 + 雇主 + 代币 + 期数。
     // 验证者据此确认「该 tier 是针对自己提交的 threshold、由可信雇主签发的指定代币工资单算出」，
     // 否则员工可用 threshold=1 或自造代币的空气工资单伪造高档位。回吐凭证给 owner。
