@@ -3,11 +3,27 @@ let currentWallet: string | null = null
 let sessionToken: string | null = null
 let pending: Promise<boolean> | null = null // in-flight / 已落定的 signIn（防重复弹签名窗）
 
+// 会话 JWT 持久化（按钱包分 key）：刷新后恢复，免每次重新签名登录。JWT 自带 exp，本地即可判有效。
+const tokenKey = (wallet: string) => `sealary.jwt.${wallet}`
+
+function loadToken(wallet: string): string | null {
+  try {
+    const t = localStorage.getItem(tokenKey(wallet))
+    if (!t) return null
+    const { exp } = JSON.parse(atob(t.split('.')[1])) as { exp?: number }
+    if (typeof exp === 'number' && exp * 1000 > Date.now() + 60_000) return t
+    localStorage.removeItem(tokenKey(wallet)) // 过期清掉，走重签
+  } catch {
+    /* 损坏视为无 */
+  }
+  return null
+}
+
 export function setWallet(wallet: string | null) {
   if (wallet === currentWallet) return
   currentWallet = wallet
-  sessionToken = null // 断开或换钱包都清旧会话（旧 token 属于旧钱包）
   pending = null
+  sessionToken = wallet ? loadToken(wallet) : null // 换钱包不串会话；刷新/重连恢复本钱包的
 }
 
 export function authHeaders(): Record<string, string> {
@@ -42,6 +58,7 @@ async function doSignIn(wallet: string, signMessage: SignMessage): Promise<boole
     const { token } = await postJson('/api/auth/verify', { wallet, nonce, signature })
     if (token && wallet === currentWallet) {
       sessionToken = token
+      localStorage.setItem(tokenKey(wallet), token) // 刷新后 loadToken 恢复
       return true
     }
   } catch {
@@ -53,6 +70,8 @@ async function doSignIn(wallet: string, signMessage: SignMessage): Promise<boole
 // Sign in with Aleo：nonce → 钱包签名 → 服务端验签 → 存会话 JWT。
 // 幂等：已有会话直接返回；同一钱包只发起一次（signMessage 引用变化不再重复弹窗）。
 export function signIn(wallet: string, signMessage: SignMessage): Promise<boolean> {
+  // dev 走 x-dev-wallet 头免签名（authHeaders），不弹签名窗；SIWA 在 prod/preview 上验证。
+  if (import.meta.env.DEV) return Promise.resolve(false)
   if (sessionToken && wallet === currentWallet) return Promise.resolve(true)
   if (!pending) pending = doSignIn(wallet, signMessage)
   return pending

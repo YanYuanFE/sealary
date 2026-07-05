@@ -3,7 +3,7 @@
 import { SignJWT, jwtVerify } from 'jose'
 import { randomBytes, createHmac } from 'node:crypto'
 
-const SESSION_TTL = '2h'
+const SESSION_TTL = '7d' // demo 期内刷新不重签；正式上线收紧到小时级
 
 function secret(): Uint8Array {
   const s = process.env.SESSION_SECRET
