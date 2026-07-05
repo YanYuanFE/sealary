@@ -9,6 +9,7 @@ import {
 } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/PageHeader'
 import { SealedAmount } from '@/components/SealedAmount'
+import { TxLink } from '@/components/TxLink'
 import { TierBadge } from '@/components/TierBadge'
 import { SealMark } from '@/components/brand/SealMark'
 import { tierOf, period, shortAddr, money } from '@/lib/format'
@@ -167,7 +168,7 @@ function ProvePanel({ latest, decimals, symbol, wallet }: { latest?: Stub; decim
     try {
       // §4.2：threshold 也转 base units，与链上 Paystub.amount 同口径，否则 tier 算错。
       const res = await executeTransaction(proveIncomeOpts(latest.uid, toBase(threshold, decimals)))
-      toast.success('Proof submitted on-chain', { description: res?.transactionId ?? 'submitted' })
+      toast.success('Proof submitted on-chain', { description: <TxLink txId={res?.transactionId} /> })
     } catch (e) {
       toast.error('Proof failed', { description: String((e as Error)?.message ?? e) })
     } finally {
@@ -264,7 +265,7 @@ function DiscloseDialog({ stub, decimals, symbol, wallet }: { stub: Stub; decima
     setBusy(true)
     try {
       const res = await executeTransaction(discloseOpts(stub.uid))
-      toast.success('Seal broken on-chain', { description: res?.transactionId ?? 'submitted' })
+      toast.success('Seal broken on-chain', { description: <TxLink txId={res?.transactionId} /> })
       setOpen(false); setParty('')
     } catch (e) {
       toast.error('Disclosure failed', { description: String((e as Error)?.message ?? e) })

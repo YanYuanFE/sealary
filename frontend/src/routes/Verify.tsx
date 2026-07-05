@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { PageHeader } from '@/components/PageHeader'
 import { TierBadge } from '@/components/TierBadge'
+import { TxLink } from '@/components/TxLink'
 import { money, shortAddr, period, type Tier } from '@/lib/format'
 import { API_BASE, PROGRAM } from '@/lib/aleo'
 import { fetchTokenInfo, fromBase } from '@/lib/units'
@@ -129,6 +130,10 @@ export function Verify() {
                 <Kv k="Issued by" v={shortAddr(result.employer)} />
                 <Kv k="Token" v={`${result.symbol} · ${shortAddr(result.tokenId, 4, 4)}`} />
                 <Kv k="Period" v={period(result.period)} />
+                <div className="flex items-center justify-between">
+                  <span className="text-muted-foreground">Transaction</span>
+                  <span className="text-xs"><TxLink txId={txId.trim()} /></span>
+                </div>
               </div>
               <p className="mt-3 flex items-center gap-1.5 text-xs text-proven">
                 <ShieldCheck className="size-3.5" /> Verified against a real employer-signed payslip. No amount crossed the wire.

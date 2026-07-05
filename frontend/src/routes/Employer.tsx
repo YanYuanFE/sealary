@@ -10,10 +10,11 @@ import {
 } from '@/components/ui/dialog'
 import { PageHeader, StatCard } from '@/components/PageHeader'
 import { SealedAmount } from '@/components/SealedAmount'
+import { TxLink } from '@/components/TxLink'
 import { ConnectButton } from '@/components/ConnectButton'
 import { Card } from '@/components/ui/card'
 import { shortAddr, money, period } from '@/lib/format'
-import { payBatchOpts, PAY_BATCH, setSalaryOpts, updateSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM, EXPLORER_TX } from '@/lib/aleo'
+import { payBatchOpts, PAY_BATCH, setSalaryOpts, updateSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM } from '@/lib/aleo'
 import { toBase, fromBase } from '@/lib/units'
 import { getCompany, listEmployees, addEmployee, listPayments, recordPayment, type Company, type Person, type Payment } from '@/lib/api'
 
@@ -219,7 +220,12 @@ function Console({ company, address, executeTransaction, requestRecords }: {
         .then(() => listPayments(company.id).then(setPayments))
         .catch(() => toast.warning('Paid on-chain, but saving history failed', { description: 'It will not appear in Payment history.' }))
       toast.success(`Sealed pay → ${targets.length} employee${targets.length > 1 ? 's' : ''}`, {
-        description: (res?.transactionId ?? 'submitted') + (payable.length > targets.length ? ' · run again for the next batch' : ''),
+        description: (
+          <span>
+            <TxLink txId={res?.transactionId} />
+            {payable.length > targets.length ? ' · run again for the next batch' : ''}
+          </span>
+        ),
       })
     } catch (e) {
       toast.error('Pay failed', { description: String((e as Error)?.message ?? e) })
@@ -384,14 +390,8 @@ function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol }
                 <td className="px-5 py-3.5 text-right">
                   <SealedAmount amount={totalOf(ps)} revealed={reveal} size="sm" token={symbol} />
                 </td>
-                <td className="px-5 py-3.5 font-mono text-xs">
-                  {first.txId.startsWith('at1') ? (
-                    <a href={EXPLORER_TX(first.txId)} target="_blank" rel="noreferrer" className="text-seal hover:underline">
-                      {shortAddr(first.txId, 8, 6)}
-                    </a>
-                  ) : (
-                    <span className="text-muted-foreground">{first.txId}</span>
-                  )}
+                <td className="px-5 py-3.5 text-xs">
+                  <TxLink txId={first.txId} />
                 </td>
                 <td className="px-5 py-3.5 text-right font-mono text-xs text-muted-foreground">
                   {new Date(first.createdAt).toLocaleDateString()}
