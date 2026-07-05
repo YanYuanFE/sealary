@@ -210,14 +210,27 @@ function Console({ company, address, executeTransaction, requestRecords }: {
     listPayments(company.id).then(setPayments).catch(() => {})
   }
 
-  // 被遗忘权：后端删身份 + crypto-shred。链上 SalaryConfig 不动——
-  // 花名册没了此人就发不了薪；若日后重新入职，AddEmployee 的 update 路径会直接复用旧 record。
+  // 被遗忘权：后端删身份 + crypto-shred，然后链上作废 SalaryConfig（update_salary→0 消费旧 record，
+  // 使其退出未花费集合——链上历史密文无法物理删除，但只有雇主 view key 可读且不再被任何读取端看到）。
   async function forget() {
     if (!removing) return
     setShredding(true)
     try {
       await forgetEmployee(removing.id)
-      toast.success(`${removing.name} removed · PII crypto-shredded`)
+      const cfg = salaries[removing.walletAddress]
+      if (cfg) {
+        try {
+          await executeTransaction(updateSalaryOpts(cfg.uid, 0n))
+          toast.success(`${removing.name} removed · PII shredded · on-chain config voided`)
+        } catch (e) {
+          // 身份已删（发不了薪），作废失败只提示——残留 record 只有雇主可读，可下次再作废。
+          toast.warning('Removed & shredded, but on-chain config not voided', {
+            description: String((e as Error)?.message ?? e),
+          })
+        }
+      } else {
+        toast.success(`${removing.name} removed · PII crypto-shredded`)
+      }
       setRemoving(null)
       refresh()
     } catch (e) {
@@ -396,7 +409,8 @@ function Console({ company, address, executeTransaction, requestRecords }: {
             <DialogTitle className="font-heading text-xl">Remove {removing?.name}?</DialogTitle>
             <DialogDescription>
               Deletes their identity and destroys its encryption key (crypto-shred) — the stored ciphertext becomes
-              permanently unreadable (GDPR right to be forgotten). Sealed on-chain records are untouched.
+              permanently unreadable (GDPR right to be forgotten). Their sealed on-chain salary config is voided too
+              (one wallet approval). Paystubs already issued belong to the employee and stay theirs.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
