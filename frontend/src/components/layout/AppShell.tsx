@@ -1,7 +1,10 @@
+import { useEffect } from 'react'
 import { NavLink, Link } from 'react-router-dom'
+import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { cn } from '@/lib/utils'
 import { Wordmark } from '@/components/brand/SealMark'
 import { ConnectButton } from '@/components/ConnectButton'
+import { setWallet, signIn } from '@/lib/auth'
 
 const nav = [
   { to: '/employer', label: 'Employer' },
@@ -9,7 +12,17 @@ const nav = [
   { to: '/verify', label: 'Verify' },
 ]
 
+// 连钱包 → 绑定认证钱包 + 尝试 SIWA 登录（拿会话 JWT；dev 下失败则回退 x-dev-wallet）。
+function useAuthSync() {
+  const { connected, address, signMessage } = useWallet()
+  useEffect(() => {
+    setWallet(connected && address ? address : null)
+    if (connected && address && signMessage) void signIn(address, signMessage)
+  }, [connected, address, signMessage])
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
+  useAuthSync()
   return (
     <div className="paper-bg min-h-screen text-foreground">
       <header className="sticky top-0 z-40 border-b border-border/70 bg-paper/80 backdrop-blur-md">

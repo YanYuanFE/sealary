@@ -22,8 +22,9 @@ frontend/
 
 - ✅ **编译通过**：`npm run typecheck:api`（exit 0）。
 - ✅ **已自检**：`api/_lib/crypto.ts`（AES-256-GCM 往返 / 密钥包裹 / crypto-shred / 篡改检测）。
-- ✅ **本地端到端已验**（真实 Neon）：companies/employees 读写 + PII 加密解密往返 + 所有权 403 全通过。
-- ⚠️ **待接线**：`api/_lib/siwa.ts` 的 `verifyAleoSignature` 需 `@provablehq/sdk`（aleo wasm）落地——**未验签前不要上生产**。
+- ✅ **本地端到端已验**（真实 Neon）：companies/employees/me 读写 + PII 加密解密往返 + 所有权 403 全通过。
+- ✅ **SIWA 验签已落地**（`@provablehq/sdk`，动态 import 只在 /auth/verify 加载）：用真实 Aleo 签名验证 nonce→sign→verify→JWT→Bearer 全链路通过（有效签发 token、错误签名 401）。
+- ⚠️ **一个未测点**：前端 `auth.ts` 假设钱包 `signMessage` 返回的是 `sign1…` 字符串的 UTF-8 字节（`TextDecoder` 解回）。SDK 造的签名已验证；**真实浏览器钱包的字节格式需连钱包点一次确认**——若不符，`signIn` 会失败（dev 回退 x-dev-wallet，prod 登录失败）。
 
 ## 本地开发（无需 vercel dev）
 

@@ -26,11 +26,16 @@ export function nonceValid(wallet: string, nonce: string): boolean {
   return nonce === expect
 }
 
-// 验证 Aleo 钱包对 message 的签名。
-// ⚠️ 需 @provablehq/sdk（aleo wasm）落地：Account/Signature.verify(address, message, signature)。
-// 脚手架先留接口；接线时用 SDK 实现，未验签前不要上生产。
-export async function verifyAleoSignature(_address: string, _message: string, _signature: string): Promise<boolean> {
-  throw new Error('verifyAleoSignature: wire @provablehq/sdk signature verification before use')
+// 验证 Aleo 钱包对 message 的签名（@provablehq/sdk）。
+// 动态 import：wasm SDK 只在 /auth/verify 时加载，不拖累 authWallet 等其他端点的冷启动。
+// message 为 nonce 字符串（前端以 UTF-8 字节签名，此处同样编码）；signature 为 `sign1…` 串。
+export async function verifyAleoSignature(address: string, message: string, signature: string): Promise<boolean> {
+  try {
+    const { Signature, Address } = await import('@provablehq/sdk')
+    return Signature.from_string(signature).verify(Address.from_string(address), new TextEncoder().encode(message))
+  } catch {
+    return false // fail-closed（含 SDK 加载失败 / 签名格式不符）
+  }
 }
 
 export async function mintSession(wallet: string): Promise<string> {

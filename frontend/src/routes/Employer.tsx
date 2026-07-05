@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { toast } from 'sonner'
-import { Eye, EyeOff, Send, UserPlus, Download, Coins, Building2 } from 'lucide-react'
+import { Eye, EyeOff, Send, UserPlus, Download, Coins, Building2, Loader2 } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -15,7 +15,7 @@ import { Card } from '@/components/ui/card'
 import { shortAddr, money, period } from '@/lib/format'
 import { payOpts } from '@/lib/aleo'
 import { toBase, fromBase } from '@/lib/units'
-import { getCompanyByWallet, listEmployees, addEmployee, type Company, type Person } from '@/lib/api'
+import { getCompany, listEmployees, addEmployee, type Company, type Person } from '@/lib/api'
 
 const isAleoAddr = (a: string) => /^aleo1[a-z0-9]{58}$/.test(a)
 
@@ -50,7 +50,12 @@ async function fetchBalance(requestRecords: Wallet['requestRecords'], tokenId: s
 
 export function Employer() {
   const { connected, address, executeTransaction, requestRecords } = useWallet()
-  const company = connected && address ? getCompanyByWallet(address) : undefined
+  const [company, setCompany] = useState<Company | null | undefined>(undefined) // undefined=加载中
+
+  useEffect(() => {
+    if (connected && address) getCompany().then(setCompany).catch(() => setCompany(null))
+    else setCompany(null)
+  }, [connected, address])
 
   if (!connected || !address) {
     return (
@@ -58,6 +63,9 @@ export function Employer() {
         <ConnectButton />
       </Gate>
     )
+  }
+  if (company === undefined) {
+    return <Gate icon={<Loader2 className="size-8 animate-spin text-seal" />} text="Loading your organization…">{null}</Gate>
   }
   if (!company) {
     return (
@@ -83,11 +91,15 @@ function Console({ company, executeTransaction, requestRecords }: {
   company: Company
   executeTransaction: Wallet['executeTransaction']; requestRecords: Wallet['requestRecords']
 }) {
-  const [roster, setRoster] = useState<Person[]>(() => listEmployees(company.id))
+  const [roster, setRoster] = useState<Person[]>([])
   const [paidIds, setPaidIds] = useState<Set<string>>(new Set())
   const [reveal, setReveal] = useState(false)
   const [busy, setBusy] = useState(false)
   const [balance, setBalance] = useState<number | null>(null)
+
+  useEffect(() => {
+    listEmployees(company.id).then(setRoster).catch(() => setRoster([]))
+  }, [company.id])
 
   useEffect(() => {
     fetchBalance(requestRecords, company.tokenId, company.decimals).then(setBalance)
@@ -98,7 +110,7 @@ function Console({ company, executeTransaction, requestRecords }: {
   const payrollTotal = useMemo(() => roster.reduce((s, e) => s + e.salary, 0), [roster])
   const pendingTotal = useMemo(() => pending.reduce((s, e) => s + e.salary, 0), [pending])
 
-  function refresh() { setRoster(listEmployees(company.id)) }
+  function refresh() { listEmployees(company.id).then(setRoster).catch(() => {}) }
 
   async function runBatch() {
     const next = payTarget
@@ -268,16 +280,20 @@ function AddEmployee({ companyId, token, onAdded }: { companyId: string; token: 
 
   const validAddr = isAleoAddr(address)
 
-  function submit() {
+  async function submit() {
     if (!name || !salary) return
     if (!validAddr) {
       toast.error('Invalid Aleo address', { description: 'Paste the employee’s real aleo1… address to pay on-chain.' })
       return
     }
-    addEmployee({ companyId, name, title: title || 'Employee', walletAddress: address, salary: Number(salary) })
-    toast.success(`${name} added to roster`)
-    setName(''); setTitle(''); setSalary(''); setAddress(''); setOpen(false)
-    onAdded()
+    try {
+      await addEmployee(companyId, { name, title: title || 'Employee', walletAddress: address, salary: Number(salary) })
+      toast.success(`${name} added to roster`)
+      setName(''); setTitle(''); setSalary(''); setAddress(''); setOpen(false)
+      onAdded()
+    } catch (e) {
+      toast.error('Add failed', { description: String((e as Error)?.message ?? e) })
+    }
   }
 
   return (

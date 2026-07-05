@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { toast } from 'sonner'
 import { KeyRound, ShieldCheck, ScanEye, Lock, Loader2 } from 'lucide-react'
@@ -14,7 +14,7 @@ import { SealMark } from '@/components/brand/SealMark'
 import { tierOf, period, shortAddr, money } from '@/lib/format'
 import { PROGRAM, proveIncomeOpts, discloseOpts } from '@/lib/aleo'
 import { fetchTokenInfo, toBase, fromBase } from '@/lib/units'
-import { getPersonByWallet } from '@/lib/api'
+import { getMe, type Person, type Company } from '@/lib/api'
 
 // 只取子组件真正用到的钱包方法（避免要求整个 WalletContextState）。
 type Wallet = Pick<ReturnType<typeof useWallet>, 'connected' | 'address' | 'requestRecords' | 'executeTransaction'>
@@ -47,8 +47,12 @@ export function Employee() {
   const [decimals, setDecimals] = useState(6)
   const [symbol, setSymbol] = useState('zUSD')
   const [loading, setLoading] = useState(false)
+  const [identity, setIdentity] = useState<{ person: Person; company: Company } | null>(null)
 
-  const identity = connected && address ? getPersonByWallet(address) : undefined
+  useEffect(() => {
+    if (connected && address) getMe().then(setIdentity).catch(() => setIdentity(null))
+    else setIdentity(null)
+  }, [connected, address])
 
   async function decrypt() {
     if (!connected || !address || !requestRecords) {

@@ -20,7 +20,9 @@
 - [x] **前端全站去 mock**：删 `mock.ts`；Employer 花名册/公司来自 `lib/api`、余额尽力读链上；Employee 解密真实 Paystub（`requestRecords`）；Verify 凭 `prove_income` tx id 读公开输出（tier+employer+token+threshold，永不见金额）
 - [x] **创建组织流程**（`/setup`）：输入 name/region/token_id → `TokenCard` 链上校验代币信息（拉不到禁用提交）→ 建组织
 - [x] **金额口径统一**（`lib/units.ts` toBase/fromBase + u128→ascii，自检 5/5）：链上 base units、展示人类可读，pay/prove 两端同缩放
-- [x] **后端脚手架**（`frontend/api/`）：schema（5 表）+ 服务端 AES-256-GCM PII 加密（自检 4/4）+ crypto-shred + SIWA 结构 + companies/employees/persons handlers + README。**未 provision、未端到端验**
+- [x] **后端**（`frontend/api/`，与前端同 Vercel 项目）：schema（5 表）+ 服务端 AES-256-GCM PII 加密（自检 4/4）+ crypto-shred + companies/employees/me/persons handlers。**Neon 已建、本地端到端验通**
+- [x] **本地 API 调试**：vite `devApi()` 插件把 `api/*.ts` 挂进 dev server（`npm run dev` 同时跑前端+API，无需 vercel dev）；`db-push.mjs` 免 psql 建表；`ALLOW_DEV_AUTH` + `x-dev-wallet` 头 dev 免签名
+- [x] **前端接后端**：`lib/api.ts` 改 async fetch(`/api`)，CreateOrg/Employer/Employee 改 useEffect+state；`lib/auth.ts` 管会话（dev x-dev-wallet / prod SIWA JWT），AppShell 连钱包即 signIn
 
 ---
 
@@ -51,7 +53,7 @@
 
 - [x] Vercel Functions API 骨架（auth/companies/employees/persons handlers）
 - [x] Postgres schema（company/person/employment/audit_log/encryption_keys）— `frontend/schema.sql`
-- [~] Sign in with Aleo：nonce（无状态 HMAC）+ 会话 JWT 已写；**`verifyAleoSignature` 待用 `@provablehq/sdk` 落地**
+- [x] Sign in with Aleo：nonce（无状态 HMAC）+ `@provablehq/sdk` 验签 + 会话 JWT，真实 Aleo 签名端到端验证通过（钱包 signMessage 字节格式待连钱包确认，见 BACKEND.md）
 - [x] PII 加密：AES-256-GCM per-person DEK + 证件号 HMAC（`frontend/api/_lib/crypto.ts`，自检 4/4）
 - [x] 审计日志（append-only）+ 被遗忘权（crypto-shred + 级联删除，`persons.ts`）
 - [ ] **Provision + 端到端联调**：Neon（EU）+ Vercel 部署 + env（MASTER_KEY/SESSION_SECRET）+ 前端 `api.ts` 换 fetch（变 async，调用点加 await）

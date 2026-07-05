@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { toast } from 'sonner'
@@ -8,7 +8,7 @@ import { Card } from '@/components/ui/card'
 import { PageHeader } from '@/components/PageHeader'
 import { TokenCard } from '@/components/TokenCard'
 import { ConnectButton } from '@/components/ConnectButton'
-import { createCompany, getCompanyByWallet } from '@/lib/api'
+import { createCompany, getCompany, type Company } from '@/lib/api'
 import type { TokenInfo } from '@/lib/units'
 
 export function CreateOrg() {
@@ -18,15 +18,28 @@ export function CreateOrg() {
   const [region, setRegion] = useState('EU')
   const [tokenId, setTokenId] = useState('')
   const [token, setToken] = useState<TokenInfo | null>(null)
+  const [existing, setExisting] = useState<Company | null>(null)
+  const [busy, setBusy] = useState(false)
 
-  const existing = connected && address ? getCompanyByWallet(address) : undefined
-  const ready = connected && !!address && name.trim() !== '' && !!token
+  useEffect(() => {
+    if (connected && address) getCompany().then(setExisting).catch(() => setExisting(null))
+    else setExisting(null)
+  }, [connected, address])
 
-  function submit() {
+  const ready = connected && !!address && name.trim() !== '' && !!token && !busy
+
+  async function submit() {
     if (!ready || !address || !token) return
-    createCompany({ employerWallet: address, name: name.trim(), region, tokenId: tokenId.trim(), symbol: token.symbol || token.name, decimals: token.decimals })
-    toast.success(`Organization “${name.trim()}” created`, { description: `Payroll token ${token.symbol || token.name} · ${token.decimals} decimals` })
-    navigate('/employer')
+    setBusy(true)
+    try {
+      await createCompany({ name: name.trim(), region, tokenId: tokenId.trim(), symbol: token.symbol || token.name, decimals: token.decimals })
+      toast.success(`Organization “${name.trim()}” created`, { description: `Payroll token ${token.symbol || token.name} · ${token.decimals} decimals` })
+      navigate('/employer')
+    } catch (e) {
+      toast.error('Create failed', { description: String((e as Error)?.message ?? e) })
+    } finally {
+      setBusy(false)
+    }
   }
 
   return (

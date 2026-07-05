@@ -8,7 +8,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!wallet) return res.status(401).json({ error: 'auth' })
 
   if (req.method === 'GET') {
-    const rows = await sql`select id, name, region, token_id, symbol, decimals from company where employer_wallet = ${wallet}`
+    const rows = await sql`select id, name, region, token_id as "tokenId", symbol, decimals from company where employer_wallet = ${wallet}`
     return res.json(rows[0] ?? null)
   }
 
@@ -19,7 +19,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       insert into company (employer_wallet, name, region, token_id, symbol, decimals)
       values (${wallet}, ${name}, ${region ?? 'EU'}, ${tokenId}, ${symbol}, ${decimals})
       on conflict (employer_wallet) do update set name = excluded.name, token_id = excluded.token_id, symbol = excluded.symbol, decimals = excluded.decimals
-      returning id, name, region, token_id, symbol, decimals`
+      returning id, name, region, token_id as "tokenId", symbol, decimals`
     await audit(wallet, 'company.create', String(rows[0].id))
     return res.json(rows[0])
   }
