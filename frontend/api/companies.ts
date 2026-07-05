@@ -15,9 +15,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'POST') {
     const { name, region, tokenId, symbol, decimals } = req.body ?? {}
     if (!name || !tokenId || symbol == null || decimals == null) return res.status(400).json({ error: 'name, tokenId, symbol, decimals required' })
+    // region = 公司所在国 ISO-2 码（对齐 Paychain 的 country_code；列名沿用 region）
+    if (!/^[A-Z]{2}$/.test(String(region ?? ''))) return res.status(400).json({ error: 'region must be an ISO-2 country code' })
     const rows = await sql`
       insert into company (employer_wallet, name, region, token_id, symbol, decimals)
-      values (${wallet}, ${name}, ${region ?? 'EU'}, ${tokenId}, ${symbol}, ${decimals})
+      values (${wallet}, ${name}, ${region}, ${tokenId}, ${symbol}, ${decimals})
       on conflict (employer_wallet) do update set name = excluded.name, token_id = excluded.token_id, symbol = excluded.symbol, decimals = excluded.decimals
       returning id, name, region, token_id as "tokenId", symbol, decimals`
     await audit(wallet, 'company.create', String(rows[0].id))
