@@ -22,8 +22,19 @@ frontend/
 
 - ✅ **编译通过**：`npm run typecheck:api`（exit 0）。
 - ✅ **已自检**：`api/_lib/crypto.ts`（AES-256-GCM 往返 / 密钥包裹 / crypto-shred / 篡改检测）。
+- ✅ **本地端到端已验**（真实 Neon）：companies/employees 读写 + PII 加密解密往返 + 所有权 403 全通过。
 - ⚠️ **待接线**：`api/_lib/siwa.ts` 的 `verifyAleoSignature` 需 `@provablehq/sdk`（aleo wasm）落地——**未验签前不要上生产**。
-- ⚠️ **未端到端联调**：需先 provision Neon + 部署 Vercel。
+
+## 本地开发（无需 vercel dev）
+
+`vite.config.ts` 的 `devApi()` 插件把 `api/*.ts` 挂进 Vite dev server，`npm run dev` 一个命令同时跑前端和 API。
+
+1. `frontend/.env.local`（gitignored）填 `DATABASE_URL`（Neon）、`MASTER_KEY`（`openssl rand -base64 32`）、
+   `SESSION_SECRET`（`openssl rand -hex 32`）、`ALLOW_DEV_AUTH=true`。
+2. `npm run db:push` 建表（node 脚本，免 psql）。
+3. `npm run dev` → API 在 `http://localhost:5173/api/*`。
+4. **dev 免签名认证**：`ALLOW_DEV_AUTH=true` 时可用 `x-dev-wallet: <地址>` 头代替会话 token 调受保护端点
+   （仅本地；生产绝不设 `ALLOW_DEV_AUTH`）。
 
 ## Provision（一次性）
 

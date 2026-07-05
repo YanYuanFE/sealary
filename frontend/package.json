@@ -9,7 +9,7 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "typecheck:api": "tsc -p tsconfig.api.json",
-    "db:push": "psql \"$DATABASE_URL\" -f schema.sql"
+    "db:push": "node scripts/db-push.mjs"
   },
   "dependencies": {
     "@fontsource-variable/fraunces": "^5.2.9",
