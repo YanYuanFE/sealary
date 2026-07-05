@@ -94,3 +94,4 @@
 - 部署账户地址 `aleo1z62rhxmej9ldd9hf76xa6r5p2dm4fgvsxv90p728mrgzm4ywz5fqezlww8`（= 雇主 = zUSD admin）。私钥在 `contract/sealary/.env`（已 gitignore，勿提交）
 - payroll 程序为加 `pay_batch` 从 `sealary_pay.aleo` → **`sealary_payroll.aleo`** 重部署（Aleo @noupgrade 不可原地升级，只能换名）。旧 `sealary_pay.aleo` 弃用；薪资配置程序 `sealary_hr` → `sealary_conf`（同因加 batch）。前端 PROGRAM/HR_PROGRAM 已切新名，旧程序的 Paystub 需 re-pay 重造
 - Aleo 不能链式喂 async 外部调用的输出（tainted-value 警告），但若被调函数的 finalize 只读不变量（如 transfer_private 只断言 ext_auth/authorized_until），链式仍成立——已链上实测 pay_batch 通过
+- Leo 钱包 `requestRecords` 报 `NOT_GRANTED`（Shield 正常）：疑似旧授权快照（程序改名前）/ 扩展未切 Testnet / UponRequest 等级不放行明文。排查顺序：删站点授权重连 → 切网络 → 不行再把 `DECRYPT` 升 `OnChainHistory`。Demo 以 Shield 为准，Leo 不阻塞
