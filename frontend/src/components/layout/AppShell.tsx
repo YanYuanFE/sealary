@@ -24,7 +24,7 @@ function useAuthSync() {
 export function AppShell({ children }: { children: React.ReactNode }) {
   useAuthSync()
   return (
-    <div className="paper-bg min-h-screen text-foreground">
+    <div className="paper-bg flex min-h-screen flex-col text-foreground">
       <header className="sticky top-0 z-40 border-b border-border/70 bg-paper/80 backdrop-blur-md">
         <div className="mx-auto flex h-16 max-w-6xl items-center gap-6 px-5">
           <Link to="/" className="shrink-0">
@@ -56,7 +56,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         </div>
       </header>
 
-      <main className="mx-auto max-w-6xl px-5 py-10">{children}</main>
+      <main className="mx-auto w-full max-w-6xl flex-1 px-5 py-10">{children}</main>
 
       <footer className="mt-16 border-t border-border/70">
         <div className="mx-auto flex max-w-6xl flex-col items-start gap-1 px-5 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
