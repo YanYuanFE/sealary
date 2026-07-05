@@ -203,7 +203,6 @@ function Console({ company, executeTransaction, requestRecords }: {
                 <tr key={e.id} className="border-b border-border/50 last:border-0 hover:bg-secondary/40">
                   <td className="px-5 py-3.5">
                     <div className="font-medium text-foreground">{e.name}</div>
-                    <div className="text-xs text-muted-foreground">{e.title}</div>
                   </td>
                   <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">{shortAddr(e.walletAddress)}</td>
                   <td className="px-5 py-3.5 text-right"><SealedAmount amount={e.salary} revealed={reveal} size="sm" /></td>
@@ -274,7 +273,6 @@ function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
 function AddEmployee({ companyId, token, onAdded }: { companyId: string; token: string; onAdded: () => void }) {
   const [open, setOpen] = useState(false)
   const [name, setName] = useState('')
-  const [title, setTitle] = useState('')
   const [salary, setSalary] = useState('')
   const [address, setAddress] = useState('')
 
@@ -287,9 +285,9 @@ function AddEmployee({ companyId, token, onAdded }: { companyId: string; token: 
       return
     }
     try {
-      await addEmployee(companyId, { name, title: title || 'Employee', walletAddress: address, salary: Number(salary) })
+      await addEmployee(companyId, { name, walletAddress: address, salary: Number(salary) })
       toast.success(`${name} added to roster`)
-      setName(''); setTitle(''); setSalary(''); setAddress(''); setOpen(false)
+      setName(''); setSalary(''); setAddress(''); setOpen(false)
       onAdded()
     } catch (e) {
       toast.error('Add failed', { description: String((e as Error)?.message ?? e) })
@@ -308,7 +306,6 @@ function AddEmployee({ companyId, token, onAdded }: { companyId: string; token: 
         </DialogHeader>
         <div className="space-y-3">
           <Field label="Name"><input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Jordan Lee" /></Field>
-          <Field label="Title"><input className="field" value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Engineer" /></Field>
           <Field label="Aleo address">
             <input className="field font-mono text-xs" value={address} onChange={(e) => setAddress(e.target.value.trim())} placeholder="aleo1…" />
             {address && !validAddr && <span className="mt-1 block text-xs text-destructive">Not a valid aleo1… address</span>}

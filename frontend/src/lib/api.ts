@@ -15,7 +15,6 @@ export type Company = {
 export type Person = {
   id: string
   name: string
-  title: string
   walletAddress: string
   salary: number // 人类单位；发薪时经 toBase(salary, company.decimals) 上链
 }

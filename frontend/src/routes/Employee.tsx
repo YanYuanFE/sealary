@@ -89,7 +89,7 @@ export function Employee() {
       ) : (
         <div className="reveal space-y-8">
           <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
-            <IdentityCard address={address!} name={identity?.person.name} title={identity?.person.title}
+            <IdentityCard address={address!} name={identity?.person.name}
               employer={identity?.company.name} latest={stubs[0]} decimals={decimals} />
             <ProvePanel latest={stubs[0]} decimals={decimals} symbol={symbol}
               wallet={{ connected, address, requestRecords, executeTransaction }} />
@@ -120,8 +120,8 @@ function Locked({ loading, onUnlock }: { loading: boolean; onUnlock: () => void 
   )
 }
 
-function IdentityCard({ address, name, title, employer, latest, decimals }: {
-  address: string; name?: string; title?: string; employer?: string; latest?: Stub; decimals: number
+function IdentityCard({ address, name, employer, latest, decimals }: {
+  address: string; name?: string; employer?: string; latest?: Stub; decimals: number
 }) {
   return (
     <Card className="gap-0 p-6">
@@ -129,7 +129,7 @@ function IdentityCard({ address, name, title, employer, latest, decimals }: {
         <SealMark size={40} />
         <div>
           <p className="font-heading text-lg font-semibold">{name ?? 'You'}</p>
-          <p className="text-sm text-muted-foreground">{title ?? 'Employee'}</p>
+          <p className="text-sm text-muted-foreground">Employee</p>
         </div>
       </div>
       <div className="mt-6 space-y-3 border-t border-border/70 pt-5 text-sm">
