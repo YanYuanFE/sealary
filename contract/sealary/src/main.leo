@@ -1,6 +1,6 @@
 // Sealary — 隐私薪资：私密发薪 + 分档收入证明 + 选择性披露。
 // 价值层复用 token_registry.aleo（真钱 Token）；本程序发凭证 Paystub 并做证明/披露。
-// 设计见 ../../TECH_DESIGN.md。
+// 设计见 ../../docs/TECH_DESIGN.md。
 import token_registry.aleo;
 
 // 收入分档纯逻辑（module-level，可被测试直接调用，无需构造 record）。

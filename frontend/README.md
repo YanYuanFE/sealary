@@ -2,7 +2,7 @@
 
 三角色 dApp UI（React + Vite）。当前为 **UI-only**（mock 数据，未接链/后端）。
 
-- 设计见 [`../TECH_DESIGN.md`](../TECH_DESIGN.md) §10
+- 设计见 [`../docs/TECH_DESIGN.md`](../docs/TECH_DESIGN.md) §10
 - 主题："Sealed salary, provable income." 暖纸亮色 + 封蜡红品牌色 + 植物绿=verified
 - 栈：React 19 + Vite 8 + TS 6 + Tailwind v4 + shadcn/ui + react-router
 - 字体：Fraunces（display）/ Geist（UI）/ Geist Mono（data）

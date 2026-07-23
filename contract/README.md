@@ -2,7 +2,7 @@
 
 Aleo 上的 `sealary.aleo`：私密发薪 + 收入证明（分档）+ 选择性披露。
 
-- 设计见 [`../TECH_DESIGN.md`](../TECH_DESIGN.md) §5–6
+- 设计见 [`../docs/TECH_DESIGN.md`](../docs/TECH_DESIGN.md) §5–6
 - 价值层依赖 `token_registry.aleo`（ARC-21）
 - 需 leo ≥ 4.2（rustc ≥ 1.96）：`cargo install leo-lang`
 

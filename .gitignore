@@ -19,3 +19,6 @@
 .vscode/*
 !.vscode/extensions.json
 .idea
+
+# internal dev docs — local only, not part of the public repo
+docs/
