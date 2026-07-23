@@ -18,6 +18,30 @@ export const FEE = 1_000_000
 // 区块浏览器交易链接（testnet）。
 export const EXPLORER_TX = (txId: string) => `https://testnet.explorer.provable.com/transaction/${txId}`
 
+// ── 交易确认 ──────────────────────────────────────────────
+// executeTransaction 返回的是钱包的【临时】id，不等于落链结果：需轮询 transactionStatus，
+// accepted 后 response.transactionId 才是链上最终 id（explorer 可查）。
+export type TxOutcome = { status: 'accepted' | 'rejected' | 'failed' | 'pending'; txId: string; error?: string }
+
+export async function waitForTx(
+  transactionStatus: (tempId: string) => Promise<{ status: string; transactionId?: string; error?: string }>,
+  tempId: string,
+): Promise<TxOutcome> {
+  const deadline = Date.now() + 180_000 // ponytail: 3min 定值，testnet 通常几十秒落链；不够真机再调
+  while (Date.now() < deadline) {
+    try {
+      const r = await transactionStatus(tempId)
+      const status = r.status.toLowerCase()
+      if (status === 'accepted') return { status: 'accepted', txId: r.transactionId ?? tempId }
+      if (status === 'rejected' || status === 'failed') return { status, txId: r.transactionId ?? tempId, error: r.error }
+    } catch {
+      // 刚广播查不到 / 网络抖动 → 继续轮询
+    }
+    await new Promise((r) => setTimeout(r, 4_000))
+  }
+  return { status: 'pending', txId: tempId }
+}
+
 // ── 交易构造器（provablehq executeTransaction 的 TransactionOptions，对应 TECH_DESIGN §6）──
 // record 入参不再直接塞对象：用 { type:'record', program, recordname, uid } 引用，
 // uid 来自 requestRecords 返回的 RecordEnvelope.uid（Shield 等 conforming 钱包填充）。

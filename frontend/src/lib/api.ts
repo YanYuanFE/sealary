@@ -52,11 +52,13 @@ export function addEmployee(companyId: string, input: Omit<Person, 'id'>) {
 }
 
 // 发薪记录（仅元数据：谁/哪期/哪笔 tx——无金额，金额在链上加密）。
+// kind：salary=周期工资（Paid 徽章依据）| bonus=同期加发（不占用 Paid）。
 export type Payment = {
   id: string
   personId: string
   period: number
   txId: string
+  kind: 'salary' | 'bonus'
   createdAt: string
 }
 
@@ -64,8 +66,26 @@ export function listPayments(companyId: string) {
   return req<Payment[]>(`/payments?companyId=${encodeURIComponent(companyId)}`)
 }
 
-export function recordPayment(companyId: string, period: number, txId: string, personIds: string[]) {
-  return req<{ ok: boolean }>('/payments', { method: 'POST', body: JSON.stringify({ companyId, period, txId, personIds }) })
+export function recordPayment(companyId: string, period: number, txId: string, personIds: string[], kind: Payment['kind'] = 'salary') {
+  return req<{ ok: boolean }>('/payments', { method: 'POST', body: JSON.stringify({ companyId, period, txId, personIds, kind }) })
+}
+
+// 披露留痕（谁在何时向谁披露了什么——只元数据，无金额）。员工 prove/disclose accepted 后记录。
+export type Disclosure = {
+  id: string
+  kind: 'prove' | 'disclose'
+  period: number
+  party: string | null
+  txId: string
+  createdAt: string
+}
+
+export function listDisclosures() {
+  return req<Disclosure[]>('/disclosures')
+}
+
+export function recordDisclosure(input: { kind: Disclosure['kind']; period: number; txId: string; party?: string }) {
+  return req<Disclosure>('/disclosures', { method: 'POST', body: JSON.stringify(input) })
 }
 
 // 被遗忘权（GDPR Art.17）：删员工 + crypto-shred 其 PII 密钥，密文永久不可解。

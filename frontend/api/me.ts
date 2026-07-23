@@ -16,8 +16,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
            c.id as company_id, c.name as company_name, c.symbol, c.decimals, c.token_id, c.pay_day
     from person p
     join encryption_keys k on k.key_ref = p.key_ref
-    join employment e on e.person_id = p.id
-    join company c on c.id = e.company_id
+    join company c on c.id = p.company_id
     where p.wallet_address = ${wallet}
     limit 1`
   if (rows.length === 0) return res.json(null)

@@ -7,6 +7,7 @@ import { SealMark } from '@/components/brand/SealMark'
 import { SealedAmount } from '@/components/SealedAmount'
 import { TierBadge } from '@/components/TierBadge'
 import { HeroShader } from '@/components/marketing/HeroShader'
+import { HeroTilt } from '@/components/marketing/HeroTilt'
 import { tierOf, shortAddr } from '@/lib/format'
 
 const DEMO_AMOUNT = 14200
@@ -50,7 +51,8 @@ export function Home() {
             </div>
           </div>
 
-          <div className="reveal relative min-h-[520px]" style={{ animationDelay: '180ms' }}>
+          <div className="reveal" style={{ animationDelay: '180ms' }}>
+            <HeroTilt className="relative min-h-[520px]">
             <div className="glass-proof absolute right-0 top-4 hidden w-[78%] rotate-3 rounded-2xl border border-white/60 p-5 backdrop-blur-md md:block">
               <div className="flex items-start justify-between gap-8">
                 <div>
@@ -114,6 +116,7 @@ export function Home() {
                 </p>
               )}
             </Card>
+            </HeroTilt>
           </div>
         </div>
       </section>
@@ -715,7 +718,7 @@ function DemoTab({ active, onClick, icon, label }: { active: boolean; onClick: (
   return (
     <button
       onClick={onClick}
-      className={`flex items-center justify-center gap-2 px-2 py-3 text-sm transition-colors ${
+      className={`flex items-center justify-center gap-2 px-2 py-3 text-sm transition duration-100 active:scale-[0.97] ${
         active ? 'bg-secondary font-medium text-foreground' : 'bg-card text-muted-foreground hover:bg-secondary/50'
       }`}
     >

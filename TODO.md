@@ -27,6 +27,8 @@
 - [x] **薪资批量 `set_salary_batch`**（`sealary_conf.aleo`）：定长 8 + 补位（amount>0 过滤），一笔 tx 设 8 人 → CSV 导入审批数从 N 降到 ⌈N/8⌉。链上实测 tx `at1450n8fz…`（费 0.0048）
 - [x] **对标 Zama 获奖项目补齐**（DripPay/Paychain 功能盘点后差距 Top3）：① 移除员工 UI（花名册行删按钮 + 确认弹窗 → 后端 crypto-shred + 链上 `update_salary→0` 作废 SalaryConfig（消费旧 record 退出未花费集合；链上历史密文无法物理删除，仅雇主可读——所有链皆然）；作废失败仅警告，身份已删即发不了薪）；② 发薪弹窗余额不足预警（balance < 本批总额 → 红字 + 禁确认，金额随 reveal 门控）；③ Export 按钮真实导出发薪历史 CSV（转义自检 5/5）。组织国别 ISO-2 也已对齐 Paychain。我们独有：ZK 分档证明 + Verify 页、选择性披露、发薪即到账（他们要 withdraw）、收款人匿名（FHE 项目员工地址链上全裸）
 - [x] **发薪历史**：`payment` 表（仅元数据：person/period/tx——金额绝不进后端）+ `/api/payments` + Employer 页 Payment history（按 tx 聚合批次行，金额取当前链上 SalaryConfig、reveal 门控，tx 链接 provable explorer）。Paid 徽章改由本期发薪记录派生——刷新不再丢
+- [x] **codex review P0 修复**（租户隔离 + 发薪确认）：① `person` 改按 `(company_id, wallet_address)` 租户隔离（原全局唯一 wallet：另一公司添加同钱包会覆盖姓名密文/密钥，还能删对方 person 级联掉雇佣与支付记录）——`employment` 归属折进 `person.company_id` 后删表，employees/persons/me 三个 handler 同步，Neon 已迁移（幂等重跑验证），跨公司覆盖/误删攻击路径 SQL 演练 5/5 通过；② 发薪从「提交即标 Paid」改为 `waitForTx` 轮询 `transactionStatus`：accepted（换最终 tx id）才落库，rejected/failed 不落库（否则员工被错标已付、下批永远跳过），3min 超时警告防双发，确认进度走 toast 不困在弹窗（**轮询路径待真机验证**）
+- [x] **对标 Aztec 隐私薪资 PRD 补齐**（低成本四件，PRD 其余为 SaaS 产品期能力）：① 签名导出——所有 CSV 尾行附 `# sealary-export … sha256=…`（hash 覆盖数据行，含批次元数据，防篡改可验证；`lib/export.ts` 自检 3/3）；② 披露留痕——员工 prove/disclose 改走 `waitForTx`，accepted 后记 `disclosure` 表（期数/自报接收方/tx id——无金额）+ Employee 页 Disclosure log（对上 PRD"谁在何时向谁披露了什么"）；③ 期间聚合报表——Payment history 头部 Report 按钮导出 per-period 聚合 CSV（人数/笔数/批次/总额，无姓名地址无单人金额）；④ 单笔 bonus/临时付款——花名册行 Gift 按钮走单笔 `pay`（payment.kind=bonus，不占 Paid 徽章，同期可加发；bonus 金额只在员工 Paystub，雇主侧显示 sealed）。**不做**：多角色权限/通知/HRIS 集成/多币种（产品期，评委看不出差异）
 - [x] **代码 review P0/P1 修复**：① 发薪 Token record 改 `pickTokenUid`（按 token_id 精确匹配 + 余额 ≥ 批总额取最大，不再被补位 0 额找零坑）；② 薪资写入 set/update 分流（已有 SalaryConfig → `update_salary` 消费旧 record，防新旧并存按旧薪资发钱；CSV 同地址去重取末行）；③ 后端 `person` upsert（重复添加/重导不再 500）；④ signIn 加 in-flight/已登录守卫 + `authReady()`（api 首请求前等 signIn 落定，消 prod 401 竞态；换钱包清旧 token）；⑤ 余额匹配 `token_id:\s*X\b` 防子串误配
 
 ---
@@ -39,7 +41,7 @@
 - [x] 注册薪资币 `zUSD`（token_id `7777field`, ext_auth=false；tx `at1zuhwv364dshz2x9krcu0paprld5tznrdycmsjzhyy084fvupzgzstvpfz5`）
 - [x] `mint_private(zUSD, 雇主, 1e12)` 给雇主账户（tx `at1dl6dwx2zr83dukhxkaelel9cerg3utvem8fcutdgpwhujwu7rsfquj2ry9`）
 - [ ] 端到端联调：连钱包 → Employee `requestRecords('sealary_pay.aleo', true, 'unspent')` 取到 Paystub → 用其 `uid` 走 `executeTransaction` prove/disclose 真实上链（**uid 锚定路径仅按类型实现，未真机验证**）
-- [ ] 确认实际 execution 手续费，调 `lib/aleo.ts` 的 `FEE`
+- [ ] 确认实际 execution 手续费，调 `lib/aleo.ts` 的 `FEE`。注意口径：Leo 适配器 fee 单位是 credits（默认 0.001），`FEE=1_000_000` 会被当一百万 credits；Shield 实测带此值成功（0.0048/0.024），疑似自估费——真机确认两钱包各自单位
 
 ## P0 · 合约剩余
 
@@ -54,7 +56,7 @@
 - [~] 空态/错误态：未连钱包/未建组织/无 Paystub/token 校验失败 已覆盖；交易失败 toast 已覆盖
 - [ ] Employer 「发行薪资币」UI（可选，把 bootstrap 的 register_token/mint 搬进前端；当前用脚本）
 - [x] **批量发薪 `pay_batch`**（K=4：一笔发 4 人，链式复用找零，免"等找零 finalize"串行）：payroll 程序改名 `sealary_payroll.aleo` 重部署（tx `at16l6g8w…`）；**链上实测 pay_batch 发 4 人成功**（tx `at1ys6t6py…`，费 0.024）——验证了链式 finalize 警告对 ext_auth=false 良性（transfer_private 的 finalize 只断言不变量、不碰状态）；前端 PROGRAM 切新名 + `payBatchOpts`，发薪按 ≤4 人一批（Verify 页程序名同步）
-- [ ] 交易状态轮询（pending/finalized）+ 成功后刷新 records（现为乐观更新）
+- [x] 交易状态轮询：发薪 `waitForTx` 已接（accepted 才落库/标 Paid，成功后刷新余额；见已完成 codex review 项）。prove/disclose 也已接（后台确认，accepted 才记披露留痕，toast 跟进最终 tx id；见 PRD 补齐项）
 
 ## P1 · 后端与合规（TECH_DESIGN §15；脚手架已落 `frontend/api/`（与前端同项目），见 BACKEND_PLAN）
 
@@ -69,12 +71,13 @@
 ## P2 · 硬化 / 加分（TECH_DESIGN §14–15）
 
 - [ ] review 遗留硬化：`persons.ts` 两条 delete 包事务；`nonceValid` 换 `timingSafeEqual`；`companies.ts` POST 入参校验（decimals 范围 / tokenId 格式）+ upsert 补 region；`readSession` 校验 wallet claim 类型；Employee 页多币种时按各自 token 取 decimals
-- [ ] `prove_income` 加验证者绑定 + nonce（防证明复用）
+- [ ] `prove_income` 加验证者绑定 + nonce（防证明复用；需改合约重部署）。另：证明可信度依赖验证方自核 employer/token（合约已公开，防自造工资单）——可在 Verify 页加「核对雇主地址是否是你预期的一方」提示文案
+- [ ] 雇主侧链上 `PayrollReceipt`（发薪时铸当期金额快照 record，雇主自有）：发薪历史金额当前取现值 SalaryConfig，调薪会"改写"历史显示（回执 footnote 已声明此口径；需改合约重部署）
 - [ ] 多期收入聚合证明
 - [ ] KMS + 密钥轮换 + DPIA/DPA 文档
 - [ ] 接主网 USDCx（替代 zUSD）作真实稳定币叙事
 - [ ] 前端 E2E（Playwright：发薪→解密→证明→验证者看 tier 不见金额）
-- [ ] 薪资单 PDF/CSV 导出（真实实现，当前为 toast）
+- [x] 薪资单 PDF/CSV 导出（对标 DripPay）：`lib/export.ts`（downloadCsv 从 Employer 抽出 + `printDocument` 打印视图，浏览器另存 PDF、零依赖）。Employee 每行 payslip 可打印 + Payslips 表 Export CSV；Employer 发薪历史每批可打印 receipt
 
 ## P2 · 黑客松提交
 
@@ -96,4 +99,5 @@
 - 部署账户地址 `aleo1z62rhxmej9ldd9hf76xa6r5p2dm4fgvsxv90p728mrgzm4ywz5fqezlww8`（= 雇主 = zUSD admin）。私钥在 `contract/sealary/.env`（已 gitignore，勿提交）
 - payroll 程序为加 `pay_batch` 从 `sealary_pay.aleo` → **`sealary_payroll.aleo`** 重部署（Aleo @noupgrade 不可原地升级，只能换名）。旧 `sealary_pay.aleo` 弃用；薪资配置程序 `sealary_hr` → `sealary_conf`（同因加 batch）。前端 PROGRAM/HR_PROGRAM 已切新名，旧程序的 Paystub 需 re-pay 重造
 - Aleo 不能链式喂 async 外部调用的输出（tainted-value 警告），但若被调函数的 finalize 只读不变量（如 transfer_private 只断言 ext_auth/authorized_until），链式仍成立——已链上实测 pay_batch 通过
+- Leo 钱包 `executeTransaction` 不支持 record 输入（`hasInputRequest` 直接 throw）：pay/prove/disclose/update_salary 全用 `{type:'record',uid}`，Leo 只能跑 set_salary(_batch) 这类纯字面量交易；叠加其 fee 口径是 credits（上面 FEE 项）。决定：暂保留 Leo（demo 以 Shield 为准），上线前移除或加能力检测
 - Leo 钱包 `requestRecords` 报 `NOT_GRANTED`（Shield 正常）：疑似旧授权快照（程序改名前）/ 扩展未切 Testnet / UponRequest 等级不放行明文。排查顺序：删站点授权重连 → 切网络 → 不行再把 `DECRYPT` 升 `OnChainHistory`。Demo 以 Shield 为准，Leo 不阻塞

@@ -27,21 +27,29 @@ create table if not exists encryption_keys (
 
 create table if not exists person (
   id             uuid primary key default gen_random_uuid(),
-  wallet_address text not null unique,            -- 员工钱包（pay 收款方）
-  pii_ciphertext bytea not null,                  -- {name,title,salary} AES-256-GCM 密文
+  company_id     uuid not null references company(id) on delete cascade, -- 租户边界
+  wallet_address text not null,                   -- 员工钱包（pay 收款方）；同钱包可受雇多家公司，每家一行
+  pii_ciphertext bytea not null,                  -- {name} AES-256-GCM 密文
   key_ref        uuid not null references encryption_keys(key_ref),
   tax_id_hmac    text,                            -- 证件号 HMAC-SHA256（可搜索，不存明文）
   created_at     timestamptz not null default now()
 );
 
+-- 迁移：person 原为全局唯一 wallet_address（另一公司添加同钱包会覆盖密文/密钥，还能删除对方的
+-- person 级联掉雇佣与支付记录）→ 改按 (company_id, wallet_address) 租户隔离。
+-- employment 的归属折进 person.company_id 后删表（role/status 无代码引用）。
 create table if not exists employment (
   id         uuid primary key default gen_random_uuid(),
   company_id uuid not null references company(id) on delete cascade,
-  person_id  uuid not null references person(id) on delete cascade,
-  role       text not null default 'employee',
-  status     text not null default 'active',
-  unique (company_id, person_id)
+  person_id  uuid not null references person(id) on delete cascade
 );
+alter table person add column if not exists company_id uuid references company(id) on delete cascade;
+update person p set company_id = e.company_id from employment e where e.person_id = p.id and p.company_id is null;
+delete from person where company_id is null;
+alter table person alter column company_id set not null;
+alter table person drop constraint if exists person_wallet_address_key;
+drop table if exists employment;
+create unique index if not exists idx_person_company_wallet on person(company_id, wallet_address);
 
 -- 发薪记录（仅元数据：谁/哪期/哪笔 tx——金额绝不进后端，雇主端金额从链上 SalaryConfig 解）
 create table if not exists payment (
@@ -54,6 +62,22 @@ create table if not exists payment (
 );
 create index if not exists idx_payment_company on payment(company_id);
 
+-- 发薪类型：salary=周期工资（Paid 徽章依据）| bonus=同期加发/临时付款（不占用 Paid）
+alter table payment add column if not exists kind text not null default 'salary';
+
+-- 披露留痕（对标 PRD"谁在何时向谁披露了什么"）：员工每次 prove/disclose 记一条元数据。
+-- 只存 期数/接收方(自报)/tx——金额绝不进后端。
+create table if not exists disclosure (
+  id         uuid primary key default gen_random_uuid(),
+  wallet     text not null,                 -- 披露人（员工钱包）
+  kind       text not null,                 -- 'prove' | 'disclose'
+  period     int  not null,
+  party      text,                          -- 声称的接收方（如 Meridian Bank）
+  tx_id      text not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists idx_disclosure_wallet on disclosure(wallet);
+
 -- append-only 审计（§15.3 Art.5(2)）
 create table if not exists access_audit_log (
   id         bigserial primary key,
@@ -63,5 +87,4 @@ create table if not exists access_audit_log (
   ts         timestamptz not null default now()
 );
 
-create index if not exists idx_employment_company on employment(company_id);
 create index if not exists idx_person_taxhmac on person(tax_id_hmac);

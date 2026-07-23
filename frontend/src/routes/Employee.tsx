@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { toast } from 'sonner'
-import { KeyRound, ShieldCheck, ScanEye, Lock, Loader2 } from 'lucide-react'
+import { KeyRound, ShieldCheck, ScanEye, Lock, Loader2, Download, Printer } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import {
@@ -13,13 +13,35 @@ import { TxLink } from '@/components/TxLink'
 import { TierBadge } from '@/components/TierBadge'
 import { SealMark } from '@/components/brand/SealMark'
 import { tierOf, period, shortAddr, money } from '@/lib/format'
-import { PROGRAM, proveIncomeOpts, discloseOpts } from '@/lib/aleo'
+import { PROGRAM, proveIncomeOpts, discloseOpts, waitForTx } from '@/lib/aleo'
 import { fetchTokenInfo, toBase, fromBase } from '@/lib/units'
-import { getMe, type Person, type Company } from '@/lib/api'
+import { getMe, listDisclosures, recordDisclosure, type Person, type Company, type Disclosure } from '@/lib/api'
+import { downloadCsv, printDocument } from '@/lib/export'
 
 // 只取子组件真正用到的钱包方法（避免要求整个 WalletContextState）。
-type Wallet = Pick<ReturnType<typeof useWallet>, 'connected' | 'address' | 'requestRecords' | 'executeTransaction'>
+type Wallet = Pick<ReturnType<typeof useWallet>, 'connected' | 'address' | 'requestRecords' | 'executeTransaction' | 'transactionStatus'>
 type Stub = { uid: string; amount: bigint; period: number; employer: string; tokenId: string }
+
+// prove/disclose 提交后台确认：accepted → 记披露留痕（谁/何时/向谁——无金额）并更新 toast 为最终 tx。
+// rejected/pending 不落留痕（留痕只记真实发生的披露）。
+async function confirmAndLog(
+  wallet: Wallet, kind: Disclosure['kind'], per: number, tempId: string,
+  party: string | undefined, toastId: string | number, onLogged: () => void,
+) {
+  const fin = await waitForTx(wallet.transactionStatus, tempId)
+  if (fin.status === 'pending') {
+    toast.warning('Still pending on-chain', { id: toastId, description: <TxLink txId={tempId} /> })
+    return
+  }
+  if (fin.status !== 'accepted') {
+    toast.error(`${kind === 'prove' ? 'Proof' : 'Disclosure'} rejected on-chain`, { id: toastId, description: fin.error })
+    return
+  }
+  toast.success(kind === 'prove' ? 'Proof confirmed on-chain' : 'Seal broken on-chain', { id: toastId, description: <TxLink txId={fin.txId} /> })
+  await recordDisclosure({ kind, period: per, txId: fin.txId, party }).then(onLogged).catch(() => {
+    /* 留痕失败不阻塞——链上事实已成立 */
+  })
+}
 
 // 从 requestRecords 的密文明文里解析 Paystub 字段（best-effort，钱包返回结构不定 → 正则兜底）。
 function parsePaystubs(records: unknown[]): Stub[] {
@@ -43,16 +65,24 @@ function parsePaystubs(records: unknown[]): Stub[] {
 }
 
 export function Employee() {
-  const { connected, address, requestRecords, executeTransaction } = useWallet()
+  const { connected, address, requestRecords, executeTransaction, transactionStatus } = useWallet()
   const [stubs, setStubs] = useState<Stub[] | null>(null)
   const [decimals, setDecimals] = useState(6)
   const [symbol, setSymbol] = useState('zUSD')
   const [loading, setLoading] = useState(false)
   const [identity, setIdentity] = useState<{ person: Person; company: Company } | null>(null)
+  const [log, setLog] = useState<Disclosure[]>([]) // 披露留痕（自己的）
+
+  const refreshLog = () => listDisclosures().then(setLog).catch(() => setLog([]))
 
   useEffect(() => {
-    if (connected && address) getMe().then(setIdentity).catch(() => setIdentity(null))
-    else setIdentity(null)
+    if (connected && address) {
+      getMe().then(setIdentity).catch(() => setIdentity(null))
+      refreshLog()
+    } else {
+      setIdentity(null)
+      setLog([])
+    }
   }, [connected, address])
 
   async function decrypt() {
@@ -92,13 +122,54 @@ export function Employee() {
           <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
             <IdentityCard address={address!} name={identity?.person.name}
               employer={identity?.company.name} latest={stubs[0]} decimals={decimals} />
-            <ProvePanel latest={stubs[0]} decimals={decimals} symbol={symbol}
-              wallet={{ connected, address, requestRecords, executeTransaction }} />
+            <ProvePanel latest={stubs[0]} decimals={decimals} symbol={symbol} onLogged={refreshLog}
+              wallet={{ connected, address, requestRecords, executeTransaction, transactionStatus }} />
           </div>
           <Payslips stubs={stubs} decimals={decimals} symbol={symbol}
-            wallet={{ connected, address, requestRecords, executeTransaction }} />
+            employeeName={identity?.person.name} employerName={identity?.company.name} onLogged={refreshLog}
+            wallet={{ connected, address, requestRecords, executeTransaction, transactionStatus }} />
         </div>
       )}
+      <DisclosureLog log={log} />
+    </div>
+  )
+}
+
+// 披露留痕：本人签过的每一次 prove/disclose——何时、哪期、向谁（自报）、哪笔 tx。无金额。
+function DisclosureLog({ log }: { log: Disclosure[] }) {
+  if (log.length === 0) return null
+  return (
+    <div className="rounded-xl border border-border/80 bg-card">
+      <div className="border-b border-border/70 px-5 py-4">
+        <h2 className="font-heading text-lg font-semibold">Disclosure log</h2>
+        <p className="text-sm text-muted-foreground">Every proof or reveal you signed — who, when, to whom. Amounts are never stored.</p>
+      </div>
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b border-border/70 text-left font-mono text-xs tracking-wide text-muted-foreground uppercase">
+            <th className="px-5 py-3 font-normal">Date</th>
+            <th className="px-5 py-3 font-normal">Action</th>
+            <th className="px-5 py-3 font-normal">Period</th>
+            <th className="px-5 py-3 font-normal">Shared with</th>
+            <th className="px-5 py-3 text-right font-normal">Transaction</th>
+          </tr>
+        </thead>
+        <tbody>
+          {log.map((d) => (
+            <tr key={d.id} className="border-b border-border/50 last:border-0 hover:bg-secondary/40">
+              <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">{new Date(d.createdAt).toLocaleDateString()}</td>
+              <td className="px-5 py-3.5">
+                {d.kind === 'prove'
+                  ? <span className="text-proven">ZK proof · tier only</span>
+                  : <span className="text-seal">Amount revealed</span>}
+              </td>
+              <td className="px-5 py-3.5 font-medium">{period(d.period)}</td>
+              <td className="px-5 py-3.5 text-muted-foreground">{d.party ?? '—'}</td>
+              <td className="px-5 py-3.5 text-right text-xs"><TxLink txId={d.txId} /></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -152,7 +223,9 @@ function Line({ k, v }: { k: string; v: React.ReactNode }) {
 }
 
 // 核心差异化：输入门槛 -> 得到 tier，金额始终封着。
-function ProvePanel({ latest, decimals, symbol, wallet }: { latest?: Stub; decimals: number; symbol: string; wallet: Wallet }) {
+function ProvePanel({ latest, decimals, symbol, wallet, onLogged }: {
+  latest?: Stub; decimals: number; symbol: string; wallet: Wallet; onLogged: () => void
+}) {
   const [threshold, setThreshold] = useState(8000)
   const [busy, setBusy] = useState(false)
   const salary = latest ? fromBase(latest.amount, decimals) : 0
@@ -168,7 +241,11 @@ function ProvePanel({ latest, decimals, symbol, wallet }: { latest?: Stub; decim
     try {
       // §4.2：threshold 也转 base units，与链上 Paystub.amount 同口径，否则 tier 算错。
       const res = await executeTransaction(proveIncomeOpts(latest.uid, toBase(threshold, decimals)))
-      toast.success('Proof submitted on-chain', { description: <TxLink txId={res?.transactionId} /> })
+      const tempId = res?.transactionId
+      if (!tempId) { toast.error('Wallet returned no transaction id'); return }
+      // 提交即放行；确认与披露留痕后台走（accepted 才记录，toast 跟进最终 tx id）。
+      const toastId = toast.loading('Proof submitted — confirming on-chain…')
+      void confirmAndLog(wallet, 'prove', latest.period, tempId, undefined, toastId, onLogged)
     } catch (e) {
       toast.error('Proof failed', { description: String((e as Error)?.message ?? e) })
     } finally {
@@ -214,12 +291,50 @@ function ProvePanel({ latest, decimals, symbol, wallet }: { latest?: Stub; decim
   )
 }
 
-function Payslips({ stubs, decimals, symbol, wallet }: { stubs: Stub[]; decimals: number; symbol: string; wallet: Wallet }) {
+function Payslips({ stubs, decimals, symbol, wallet, employeeName, employerName, onLogged }: {
+  stubs: Stub[]; decimals: number; symbol: string; wallet: Wallet
+  employeeName?: string; employerName?: string; onLogged: () => void
+}) {
+  // 员工本机导出自己的 Paystub 历史（解密后数据，不经服务器）。
+  async function exportCsv() {
+    const rows = [['period', 'token_id', 'symbol', 'amount', 'employer', 'record_uid']]
+    for (const s of stubs) rows.push([period(s.period), s.tokenId, symbol, String(fromBase(s.amount, decimals)), s.employer, s.uid])
+    await downloadCsv('sealary-payslips.csv', rows, { program: PROGRAM })
+    toast.success(`Exported ${stubs.length} payslips`)
+  }
+
+  // 单张 payslip 打印视图（浏览器打印面板另存 PDF）。
+  function printStub(s: Stub) {
+    const ok = printDocument({
+      title: 'Payslip',
+      subtitle: `${employerName ?? shortAddr(s.employer)} · ${period(s.period)}`,
+      amount: `${money(fromBase(s.amount, decimals))} ${symbol}`,
+      fields: [
+        ['Employee', employeeName ? `${employeeName} · ${wallet.address ?? ''}` : (wallet.address ?? '')],
+        ['Employer', employerName ? `${employerName} · ${s.employer}` : s.employer],
+        ['Pay period', period(s.period)],
+        ['Token', `${symbol} · ${s.tokenId}`],
+        ['Record', s.uid],
+        ['Program', PROGRAM],
+      ],
+      footnote:
+        'Decrypted locally with the owner’s view key. The amount lives only in an encrypted on-chain record — no server ever saw it.',
+    })
+    if (!ok) toast.error('Pop-up blocked', { description: 'Allow pop-ups to print the payslip.' })
+  }
+
   return (
     <div className="rounded-xl border border-border/80 bg-card">
-      <div className="border-b border-border/70 px-5 py-4">
-        <h2 className="font-heading text-lg font-semibold">Payslips</h2>
-        <p className="text-sm text-muted-foreground">Decrypted for your eyes. Choose what to share, per record.</p>
+      <div className="flex items-center justify-between border-b border-border/70 px-5 py-4">
+        <div>
+          <h2 className="font-heading text-lg font-semibold">Payslips</h2>
+          <p className="text-sm text-muted-foreground">Decrypted for your eyes. Choose what to share, per record.</p>
+        </div>
+        {stubs.length > 0 && (
+          <Button variant="outline" size="sm" className="rounded-full" onClick={exportCsv}>
+            <Download className="size-4" /> Export
+          </Button>
+        )}
       </div>
       {stubs.length === 0 ? (
         <p className="px-5 py-10 text-center text-sm text-muted-foreground">No sealed payslips yet — ask your employer to run pay.</p>
@@ -241,7 +356,10 @@ function Payslips({ stubs, decimals, symbol, wallet }: { stubs: Stub[]; decimals
                 <td className="px-5 py-3.5 text-right"><SealedAmount amount={fromBase(s.amount, decimals)} revealed size="sm" /></td>
                 <td className="px-5 py-3.5">
                   <div className="flex justify-end gap-2">
-                    <DiscloseDialog stub={s} decimals={decimals} symbol={symbol} wallet={wallet} />
+                    <Button variant="ghost" size="sm" className="rounded-full" onClick={() => printStub(s)} title="Print payslip (save as PDF)">
+                      <Printer className="size-4" />
+                    </Button>
+                    <DiscloseDialog stub={s} decimals={decimals} symbol={symbol} wallet={wallet} onLogged={onLogged} />
                   </div>
                 </td>
               </tr>
@@ -253,7 +371,9 @@ function Payslips({ stubs, decimals, symbol, wallet }: { stubs: Stub[]; decimals
   )
 }
 
-function DiscloseDialog({ stub, decimals, symbol, wallet }: { stub: Stub; decimals: number; symbol: string; wallet: Wallet }) {
+function DiscloseDialog({ stub, decimals, symbol, wallet, onLogged }: {
+  stub: Stub; decimals: number; symbol: string; wallet: Wallet; onLogged: () => void
+}) {
   const [open, setOpen] = useState(false)
   const [party, setParty] = useState('')
   const [busy, setBusy] = useState(false)
@@ -265,7 +385,11 @@ function DiscloseDialog({ stub, decimals, symbol, wallet }: { stub: Stub; decima
     setBusy(true)
     try {
       const res = await executeTransaction(discloseOpts(stub.uid))
-      toast.success('Seal broken on-chain', { description: <TxLink txId={res?.transactionId} /> })
+      const tempId = res?.transactionId
+      if (!tempId) { toast.error('Wallet returned no transaction id'); return }
+      // 提交即关弹窗；确认与披露留痕（含自报接收方）后台走。
+      const toastId = toast.loading('Disclosure submitted — confirming on-chain…')
+      void confirmAndLog(wallet, 'disclose', stub.period, tempId, party.trim() || undefined, toastId, onLogged)
       setOpen(false); setParty('')
     } catch (e) {
       toast.error('Disclosure failed', { description: String((e as Error)?.message ?? e) })

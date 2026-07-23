@@ -17,19 +17,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const companyId = String(req.query.companyId ?? '')
     if (!(await ownCompany(wallet, companyId))) return res.status(403).json({ error: 'not your company' })
     const rows = await sql`
-      select id, person_id as "personId", period, tx_id as "txId", created_at as "createdAt"
+      select id, person_id as "personId", period, tx_id as "txId", kind, created_at as "createdAt"
       from payment where company_id = ${companyId}
       order by created_at desc limit 200`
     return res.json(rows)
   }
 
   if (req.method === 'POST') {
-    const { companyId, period, txId, personIds } = req.body ?? {}
+    const { companyId, period, txId, personIds, kind = 'salary' } = req.body ?? {}
     if (!companyId || !period || !txId || !Array.isArray(personIds) || personIds.length === 0)
       return res.status(400).json({ error: 'companyId, period, txId, personIds required' })
+    if (kind !== 'salary' && kind !== 'bonus') return res.status(400).json({ error: 'kind must be salary or bonus' })
     if (!(await ownCompany(wallet, companyId))) return res.status(403).json({ error: 'not your company' })
     for (const pid of personIds)
-      await sql`insert into payment (company_id, person_id, period, tx_id) values (${companyId}, ${pid}, ${period}, ${txId})`
+      await sql`insert into payment (company_id, person_id, period, tx_id, kind) values (${companyId}, ${pid}, ${period}, ${txId}, ${kind})`
     await audit(wallet, 'payment.record', String(txId))
     return res.json({ ok: true })
   }

@@ -21,8 +21,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!(await ownCompany(wallet, companyId))) return res.status(403).json({ error: 'not your company' })
     const rows = await sql`
       select p.id, p.wallet_address, p.pii_ciphertext, k.wrapped_key
-      from employment e join person p on p.id = e.person_id join encryption_keys k on k.key_ref = p.key_ref
-      where e.company_id = ${companyId}`
+      from person p join encryption_keys k on k.key_ref = p.key_ref
+      where p.company_id = ${companyId}`
     await audit(wallet, 'roster.read', companyId)
     const roster = rows.map((r) => {
       const pii = decryptPII<Pii>(r.pii_ciphertext as Buffer, unwrapKey(r.wrapped_key as Buffer))
@@ -40,16 +40,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const keyRows = await sql`insert into encryption_keys (wrapped_key) values (${wrapKey(dek)}) returning key_ref`
     const keyRef = keyRows[0].key_ref
     const cipher = encryptPII({ name } satisfies Pii, dek)
-    // 幂等：同钱包重复添加 / 重导 CSV → 覆盖 PII 并指向新 DEK（旧 key 行成孤儿，无害），不再撞 unique 500。
+    // person 按 (company_id, wallet_address) 租户隔离：同钱包在别家公司是另一行/另一把 DEK，互不覆盖。
+    // 幂等：本公司重复添加 / 重导 CSV → 覆盖 PII 并指向新 DEK（旧 key 行成孤儿，无害），不撞 unique 500。
     const personRows = await sql`
-      insert into person (wallet_address, pii_ciphertext, key_ref, tax_id_hmac)
-      values (${walletAddress}, ${cipher}, ${keyRef}, ${taxId ? taxIdHmac(taxId) : null})
-      on conflict (wallet_address) do update
+      insert into person (company_id, wallet_address, pii_ciphertext, key_ref, tax_id_hmac)
+      values (${companyId}, ${walletAddress}, ${cipher}, ${keyRef}, ${taxId ? taxIdHmac(taxId) : null})
+      on conflict (company_id, wallet_address) do update
         set pii_ciphertext = excluded.pii_ciphertext, key_ref = excluded.key_ref,
             tax_id_hmac = coalesce(excluded.tax_id_hmac, person.tax_id_hmac)
       returning id`
     const personId = personRows[0].id
-    await sql`insert into employment (company_id, person_id) values (${companyId}, ${personId}) on conflict (company_id, person_id) do nothing`
     await audit(wallet, 'employee.add', String(personId))
     return res.json({ id: personId, walletAddress, name })
   }

@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { toast } from 'sonner'
-import { Eye, EyeOff, Send, UserPlus, Upload, Download, Coins, Building2, Loader2, Trash2 } from 'lucide-react'
+import { Eye, EyeOff, Send, UserPlus, Upload, Download, Coins, Building2, Loader2, Trash2, Printer, Gift, FileText } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -14,8 +14,9 @@ import { TxLink } from '@/components/TxLink'
 import { ConnectButton } from '@/components/ConnectButton'
 import { Card } from '@/components/ui/card'
 import { shortAddr, money, period } from '@/lib/format'
-import { payBatchOpts, PAY_BATCH, setSalaryOpts, updateSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM } from '@/lib/aleo'
+import { payOpts, payBatchOpts, PAY_BATCH, setSalaryOpts, updateSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM, waitForTx } from '@/lib/aleo'
 import { toBase, fromBase } from '@/lib/units'
+import { downloadCsv, printDocument } from '@/lib/export'
 import { getCompany, listEmployees, addEmployee, forgetEmployee, listPayments, recordPayment, type Company, type Person, type Payment } from '@/lib/api'
 
 const isAleoAddr = (a: string) => /^aleo1[a-z0-9]{58}$/.test(a)
@@ -55,18 +56,7 @@ function payrollCountdown(payDay: number, from: Date = now): string {
   return days === 0 ? 'Today' : `in ${days}d`
 }
 
-// 生成并下载 CSV（含引号转义）。
-function downloadCsv(filename: string, rows: string[][]) {
-  const csv = rows.map((r) => r.map((c) => (/[",\n]/.test(c) ? `"${c.replace(/"/g, '""')}"` : c)).join(',')).join('\n')
-  const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
-  const a = document.createElement('a')
-  a.href = url
-  a.download = filename
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-type Wallet = Pick<ReturnType<typeof useWallet>, 'requestRecords' | 'executeTransaction'>
+type Wallet = Pick<ReturnType<typeof useWallet>, 'requestRecords' | 'executeTransaction' | 'transactionStatus'>
 
 // 精确匹配 token_id（\b 防 "7777field" 撞上 "17777field" 的子串）。
 const hasTokenId = (recordJson: string, tokenId: string) => new RegExp(`token_id:\\s*${tokenId}\\b`).test(recordJson)
@@ -131,7 +121,7 @@ async function fetchSalaries(requestRecords: Wallet['requestRecords']): Promise<
 }
 
 export function Employer() {
-  const { connected, address, executeTransaction, requestRecords } = useWallet()
+  const { connected, address, executeTransaction, requestRecords, transactionStatus } = useWallet()
   const [company, setCompany] = useState<Company | null | undefined>(undefined) // undefined=加载中
 
   useEffect(() => {
@@ -156,7 +146,7 @@ export function Employer() {
       </Gate>
     )
   }
-  return <Console company={company} address={address} executeTransaction={executeTransaction} requestRecords={requestRecords} />
+  return <Console company={company} address={address} executeTransaction={executeTransaction} requestRecords={requestRecords} transactionStatus={transactionStatus} />
 }
 
 function Gate({ icon, text, children }: { icon: React.ReactNode; text: string; children: React.ReactNode }) {
@@ -169,9 +159,10 @@ function Gate({ icon, text, children }: { icon: React.ReactNode; text: string; c
   )
 }
 
-function Console({ company, address, executeTransaction, requestRecords }: {
+function Console({ company, address, executeTransaction, requestRecords, transactionStatus }: {
   company: Company; address: string
   executeTransaction: Wallet['executeTransaction']; requestRecords: Wallet['requestRecords']
+  transactionStatus: Wallet['transactionStatus']
 }) {
   const [roster, setRoster] = useState<Person[]>([])
   const [salaries, setSalaries] = useState<Record<string, SalaryCfg>>({}) // 地址 → 薪资(base)+uid，来自链上 SalaryConfig
@@ -181,6 +172,7 @@ function Console({ company, address, executeTransaction, requestRecords }: {
   const [balance, setBalance] = useState<number | null>(null)
   const [removing, setRemoving] = useState<Person | null>(null) // 待确认移除的员工
   const [shredding, setShredding] = useState(false)
+  const [bonusFor, setBonusFor] = useState<Person | null>(null) // 待单笔付款的员工
 
   useEffect(() => {
     listEmployees(company.id).then(setRoster).catch(() => setRoster([]))
@@ -189,9 +181,9 @@ function Console({ company, address, executeTransaction, requestRecords }: {
     listPayments(company.id).then(setPayments).catch(() => setPayments([]))
   }, [company.id, requestRecords, company.tokenId, company.decimals])
 
-  // Paid = 本期已有发薪记录（后端持久化，刷新不丢）。
+  // Paid = 本期已有【周期工资】记录（bonus 不占用——同期可加发，月度批仍会包含此人）。
   const paidIds = useMemo(
-    () => new Set(payments.filter((p) => p.period === CURRENT_PERIOD).map((p) => p.personId)),
+    () => new Set(payments.filter((p) => p.period === CURRENT_PERIOD && p.kind === 'salary').map((p) => p.personId)),
     [payments],
   )
 
@@ -249,13 +241,13 @@ function Console({ company, address, executeTransaction, requestRecords }: {
     }
   }
 
-  // 导出发薪历史 CSV（雇主本机文件；金额取当前链上 SalaryConfig）。
-  function exportCsv() {
+  // 导出发薪历史 CSV（雇主本机文件；金额取当前链上 SalaryConfig；bonus 金额只在员工 Paystub 里，留空）。
+  async function exportCsv() {
     if (payments.length === 0) {
       toast.error('No payments to export yet')
       return
     }
-    const rows = [['period', 'employee', 'address', 'amount', 'token', 'tx_id', 'date']]
+    const rows = [['period', 'employee', 'address', 'amount', 'token', 'kind', 'tx_id', 'date']]
     for (const p of payments) {
       const person = roster.find((r) => r.id === p.personId)
       const cfg = person ? salaries[person.walletAddress] : undefined
@@ -263,14 +255,53 @@ function Console({ company, address, executeTransaction, requestRecords }: {
         String(p.period),
         person?.name ?? '',
         person?.walletAddress ?? '',
-        cfg ? String(fromBase(cfg.amount, company.decimals)) : '',
+        p.kind === 'bonus' ? '' : cfg ? String(fromBase(cfg.amount, company.decimals)) : '',
         company.symbol,
+        p.kind,
         p.txId,
         new Date(p.createdAt).toISOString(),
       ])
     }
-    downloadCsv(`sealary-payments-${company.name.replace(/\s+/g, '-')}.csv`, rows)
+    await downloadCsv(`sealary-payments-${company.name.replace(/\s+/g, '-')}.csv`, rows, { company: company.name, token: company.symbol })
     toast.success(`Exported ${payments.length} payment rows`)
+  }
+
+  // 单笔临时付款（bonus/追溯/合同款）：走单笔 pay，kind=bonus 不占 Paid 徽章，同期可加发。
+  async function payBonus(person: Person, amountHuman: number) {
+    setBusy(true)
+    try {
+      const amt = toBase(amountHuman, company.decimals)
+      const uid = await pickTokenUid(requestRecords, company.tokenId, amt)
+      if (!uid) {
+        toast.error('No Token record covers this amount', { description: `Need a single unspent ${company.symbol} record ≥ the amount — mint or consolidate first.` })
+        return
+      }
+      const res = await executeTransaction(payOpts(uid, person.walletAddress, amt, CURRENT_PERIOD))
+      const tempId = res?.transactionId
+      if (!tempId) {
+        toast.error('Wallet returned no transaction id')
+        return
+      }
+      const toastId = toast.loading(`Confirming bonus → ${person.name}…`)
+      const fin = await waitForTx(transactionStatus, tempId)
+      if (fin.status === 'pending') {
+        toast.warning('Still pending — not recorded', { id: toastId, description: 'Wait for it to settle and refresh before retrying, or you may pay twice.' })
+        return
+      }
+      if (fin.status !== 'accepted') {
+        toast.error('Transaction rejected on-chain — nothing paid', { id: toastId, description: fin.error })
+        return
+      }
+      await recordPayment(company.id, CURRENT_PERIOD, fin.txId, [person.id], 'bonus')
+        .then(() => listPayments(company.id).then(setPayments))
+        .catch(() => toast.warning('Paid on-chain, but saving history failed', { description: 'It will not appear in Payment history.' }))
+      fetchBalance(requestRecords, company.tokenId, company.decimals).then(setBalance)
+      toast.success(`Bonus sealed → ${person.name}`, { id: toastId, description: <TxLink txId={fin.txId} /> })
+    } catch (e) {
+      toast.error('Bonus failed', { description: String((e as Error)?.message ?? e) })
+    } finally {
+      setBusy(false)
+    }
   }
 
   // 一笔 pay_batch 发本批最多 4 人（薪资取自链上 SalaryConfig，已是 base units）。
@@ -292,14 +323,39 @@ function Console({ company, address, executeTransaction, requestRecords }: {
         return
       }
       const res = await executeTransaction(payBatchOpts(uid, tos, amounts, CURRENT_PERIOD))
-      // 发薪历史记后端（只元数据：人/期/tx——金额绝不进后端）。链上已成功，落库失败仅提示。
-      await recordPayment(company.id, CURRENT_PERIOD, res?.transactionId ?? 'unknown', targets.map((t) => t.id))
+      const tempId = res?.transactionId
+      if (!tempId) {
+        toast.error('Wallet returned no transaction id')
+        return
+      }
+      // executeTransaction 只是提交（临时 id）：轮询到链上 accepted 才记 Paid，
+      // rejected/failed 不落库（否则员工被错标已付、下批永远跳过）。
+      const toastId = toast.loading(`Confirming on-chain — ${targets.length} employee${targets.length > 1 ? 's' : ''}…`)
+      const fin = await waitForTx(transactionStatus, tempId)
+      if (fin.status === 'pending') {
+        toast.warning('Still pending — not recorded as paid', {
+          id: toastId,
+          description: 'Wait for it to settle and refresh before re-running, or you may pay this batch twice.',
+        })
+        return
+      }
+      if (fin.status !== 'accepted') {
+        toast.error('Transaction rejected on-chain — nobody was paid', {
+          id: toastId,
+          description: fin.error ?? 'Employees stay Pending; fix the cause and run the batch again.',
+        })
+        return
+      }
+      // 发薪历史记后端（只元数据：人/期/最终 tx id——金额绝不进后端）。链上已成功，落库失败仅提示。
+      await recordPayment(company.id, CURRENT_PERIOD, fin.txId, targets.map((t) => t.id))
         .then(() => listPayments(company.id).then(setPayments))
         .catch(() => toast.warning('Paid on-chain, but saving history failed', { description: 'It will not appear in Payment history.' }))
+      fetchBalance(requestRecords, company.tokenId, company.decimals).then(setBalance) // 找零已变，刷新余额
       toast.success(`Sealed pay → ${targets.length} employee${targets.length > 1 ? 's' : ''}`, {
+        id: toastId,
         description: (
           <span>
-            <TxLink txId={res?.transactionId} />
+            <TxLink txId={fin.txId} />
             {payable.length > targets.length ? ' · run again for the next batch' : ''}
           </span>
         ),
@@ -376,7 +432,7 @@ function Console({ company, address, executeTransaction, requestRecords }: {
                 <th className="px-5 py-3 font-normal">Address</th>
                 <th className="px-5 py-3 text-right font-normal">Salary</th>
                 <th className="px-5 py-3 text-right font-normal">Status</th>
-                <th className="w-10 px-2 py-3" />
+                <th className="w-20 px-2 py-3" />
               </tr>
             </thead>
             <tbody>
@@ -399,9 +455,14 @@ function Console({ company, address, executeTransaction, requestRecords }: {
                         : <Badge variant="outline" className="text-muted-foreground">Pending</Badge>}
                     </td>
                     <td className="px-2 py-3.5 text-right">
-                      <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-destructive" onClick={() => setRemoving(e)} aria-label={`Remove ${e.name}`}>
-                        <Trash2 className="size-4" />
-                      </Button>
+                      <div className="flex justify-end">
+                        <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-seal" onClick={() => setBonusFor(e)} disabled={!isAleoAddr(e.walletAddress)} aria-label={`One-off payment to ${e.name}`} title="One-off payment (bonus)">
+                          <Gift className="size-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-destructive" onClick={() => setRemoving(e)} aria-label={`Remove ${e.name}`}>
+                          <Trash2 className="size-4" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 )
@@ -431,7 +492,13 @@ function Console({ company, address, executeTransaction, requestRecords }: {
         </DialogContent>
       </Dialog>
 
-      <PaymentHistory payments={payments} roster={roster} salaries={salaries} decimals={company.decimals} reveal={reveal} symbol={company.symbol} />
+      <BonusDialog
+        person={bonusFor} symbol={company.symbol} busy={busy}
+        onClose={() => setBonusFor(null)}
+        onConfirm={(amt) => { const p = bonusFor; setBonusFor(null); if (p) void payBonus(p, amt) }}
+      />
+
+      <PaymentHistory payments={payments} roster={roster} salaries={salaries} decimals={company.decimals} reveal={reveal} symbol={company.symbol} companyName={company.name} />
 
       <p className="text-center font-mono text-xs text-muted-foreground">
         Total roster · {reveal ? `${money(payrollTotal)} ${company.symbol}` : '•••••• ' + company.symbol} / period
@@ -442,9 +509,9 @@ function Console({ company, address, executeTransaction, requestRecords }: {
 
 // 发薪历史：按 tx 聚合成批次行。后端只有元数据（谁/哪期/哪笔 tx）；
 // 金额来自当前链上 SalaryConfig（后端无金额可回溯，调薪后历史行跟随现值）。
-function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol }: {
+function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol, companyName }: {
   payments: Payment[]; roster: Person[]; salaries: Record<string, SalaryCfg>
-  decimals: number; reveal: boolean; symbol: string
+  decimals: number; reveal: boolean; symbol: string; companyName: string
 }) {
   const runs = useMemo(() => {
     const m = new Map<string, Payment[]>()
@@ -465,11 +532,67 @@ function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol }
       return s + (cfg ? fromBase(cfg.amount, decimals) : 0)
     }, 0)
 
+  // 期间聚合报表（对标 PRD aggregated reports）：每期 人数/笔数/批次/总额——无姓名无地址无单人金额。
+  // 总额取当前链上 SalaryConfig（与历史表同口径）；bonus 金额封在员工 Paystub 里，不计入。
+  async function exportReport() {
+    const byPeriod = new Map<number, Payment[]>()
+    for (const p of payments) {
+      const l = byPeriod.get(p.period)
+      if (l) l.push(p)
+      else byPeriod.set(p.period, [p])
+    }
+    const rows = [['period', 'employees_paid', 'salary_payments', 'bonus_payments', 'batches', 'total_salary_amount', 'token']]
+    for (const [per, ps] of [...byPeriod.entries()].sort((a, b) => b[0] - a[0])) {
+      const salary = ps.filter((p) => p.kind !== 'bonus')
+      rows.push([
+        String(per),
+        String(new Set(ps.map((p) => p.personId)).size),
+        String(salary.length),
+        String(ps.length - salary.length),
+        String(new Set(ps.map((p) => p.txId)).size),
+        String(totalOf(salary)),
+        symbol,
+      ])
+    }
+    await downloadCsv(`sealary-report-${companyName.replace(/\s+/g, '-')}.csv`, rows, {
+      company: companyName,
+      note: 'aggregated per period, no identities; totals from current on-chain SalaryConfig; bonus amounts stay sealed and are excluded',
+    })
+    toast.success('Aggregated report exported', { description: 'Per-period totals only — no names, no individual amounts.' })
+  }
+
+  // 每批一张可打印回执（浏览器打印面板另存 PDF）。金额取当前链上 SalaryConfig，与表格同口径。
+  function printReceipt(ps: Payment[]) {
+    const first = ps[0]
+    const isBonus = first.kind === 'bonus'
+    const names = ps.map((p) => personOf(p.personId)?.name ?? '—')
+    const ok = printDocument({
+      title: isBonus ? 'Bonus receipt' : 'Payroll receipt',
+      subtitle: `${companyName} · ${period(first.period)}`,
+      amount: isBonus ? '— (sealed in employee record)' : `${money(totalOf(ps))} ${symbol}`,
+      fields: [
+        ['Employees', `${names.join(', ')} (${ps.length})`],
+        ['Pay period', period(first.period)],
+        ['Token', symbol],
+        ['Transaction', first.txId],
+        ['Date', new Date(first.createdAt).toISOString()],
+      ],
+      footnote:
+        'Amounts are decrypted from employer-owned SalaryConfig records on-chain. The server stores only who, when, and the transaction id — never amounts.',
+    })
+    if (!ok) toast.error('Pop-up blocked', { description: 'Allow pop-ups to print the receipt.' })
+  }
+
   return (
     <div className="rounded-xl border border-border/80 bg-card">
-      <div className="border-b border-border/70 px-5 py-4">
-        <h2 className="font-heading text-lg font-semibold">Payment history</h2>
-        <p className="text-sm text-muted-foreground">Who &amp; when — amounts stay sealed on-chain, the server stores none.</p>
+      <div className="flex items-center justify-between border-b border-border/70 px-5 py-4">
+        <div>
+          <h2 className="font-heading text-lg font-semibold">Payment history</h2>
+          <p className="text-sm text-muted-foreground">Who &amp; when — amounts stay sealed on-chain, the server stores none.</p>
+        </div>
+        <Button variant="outline" size="sm" className="rounded-full" onClick={exportReport} title="Aggregated per-period report — no identities">
+          <FileText className="size-4" /> Report
+        </Button>
       </div>
       <table className="w-full text-sm">
         <thead>
@@ -479,25 +602,37 @@ function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol }
             <th className="px-5 py-3 text-right font-normal">Amount</th>
             <th className="px-5 py-3 font-normal">Transaction</th>
             <th className="px-5 py-3 text-right font-normal">Date</th>
+            <th className="px-5 py-3" />
           </tr>
         </thead>
         <tbody>
           {runs.map((ps) => {
             const first = ps[0]
+            const isBonus = first.kind === 'bonus'
             return (
               <tr key={first.id} className="border-b border-border/50 last:border-0 hover:bg-secondary/40">
-                <td className="px-5 py-3.5 font-medium">{period(first.period)}</td>
+                <td className="px-5 py-3.5 font-medium">
+                  {period(first.period)}
+                  {isBonus && <Badge variant="outline" className="ml-2 text-muted-foreground">Bonus</Badge>}
+                </td>
                 <td className="px-5 py-3.5 text-muted-foreground">
                   {ps.map((p) => personOf(p.personId)?.name ?? '—').join(', ')}
                 </td>
                 <td className="px-5 py-3.5 text-right">
-                  <SealedAmount amount={totalOf(ps)} revealed={reveal} size="sm" token={symbol} />
+                  {isBonus
+                    ? <span className="font-mono text-xs text-muted-foreground" title="Bonus amounts live only in the employee’s sealed Paystub">— sealed</span>
+                    : <SealedAmount amount={totalOf(ps)} revealed={reveal} size="sm" token={symbol} />}
                 </td>
                 <td className="px-5 py-3.5 text-xs">
                   <TxLink txId={first.txId} />
                 </td>
                 <td className="px-5 py-3.5 text-right font-mono text-xs text-muted-foreground">
                   {new Date(first.createdAt).toLocaleDateString()}
+                </td>
+                <td className="px-5 py-3.5 text-right">
+                  <Button variant="ghost" size="sm" className="rounded-full" onClick={() => printReceipt(ps)} title="Print receipt (save as PDF)">
+                    <Printer className="size-4" />
+                  </Button>
                 </td>
               </tr>
             )
@@ -521,8 +656,8 @@ function RunBatchDialog(
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="rounded-full" disabled={batchN === 0}>
-          <Send className="size-4" /> Pay batch {batchN > 0 && `(${batchN})`}
+        <Button className="rounded-full" disabled={batchN === 0 || busy}>
+          <Send className="size-4" /> {busy ? 'Confirming…' : `Pay batch${batchN > 0 ? ` (${batchN})` : ''}`}
         </Button>
       </DialogTrigger>
       <DialogContent>
@@ -546,7 +681,8 @@ function RunBatchDialog(
         )}
         <DialogFooter>
           <Button variant="outline" className="rounded-full" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button className="rounded-full" disabled={busy || insufficient} onClick={async () => { await onConfirm(); setOpen(false) }}>
+          {/* 立即关弹窗，链上确认进度走 toast（waitForTx 可达数分钟，不困在模态里） */}
+          <Button className="rounded-full" disabled={busy || insufficient} onClick={() => { void onConfirm(); setOpen(false) }}>
             <Send className="size-4" /> {busy ? 'Sealing…' : 'Confirm & seal'}
           </Button>
         </DialogFooter>
@@ -710,6 +846,38 @@ function ImportCsv({ companyId, tokenId, decimals, salaries, executeTransaction,
           <Button variant="outline" className="rounded-full" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
           <Button className="rounded-full" onClick={runImport} disabled={busy || rows.length === 0}>
             <Upload className="size-4" /> {busy ? `Sealing ${done}/${rows.length}…` : `Import ${rows.length || ''}`.trim()}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// 单笔付款对话框（bonus/追溯/合同款）：只收金额，确认即交回 Console 的 payBonus 执行。
+function BonusDialog({ person, symbol, busy, onClose, onConfirm }: {
+  person: Person | null; symbol: string; busy: boolean
+  onClose: () => void; onConfirm: (amount: number) => void
+}) {
+  const [amount, setAmount] = useState('')
+  useEffect(() => setAmount(''), [person])
+  const n = Number(amount)
+  return (
+    <Dialog open={!!person} onOpenChange={(v) => { if (!v) onClose() }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="font-heading text-xl">One-off payment to {person?.name}</DialogTitle>
+          <DialogDescription>
+            A single sealed payment outside the regular cycle — bonus, retro pay or contractor fee.
+            It will not mark {person?.name} as paid for the period; the monthly run still includes them.
+          </DialogDescription>
+        </DialogHeader>
+        <Field label={`Amount (${symbol})`}>
+          <input className="field font-mono" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))} placeholder="1000" inputMode="numeric" />
+        </Field>
+        <DialogFooter>
+          <Button variant="outline" className="rounded-full" onClick={onClose}>Cancel</Button>
+          <Button className="rounded-full" disabled={busy || !(n > 0)} onClick={() => onConfirm(n)}>
+            <Gift className="size-4" /> Seal &amp; pay
           </Button>
         </DialogFooter>
       </DialogContent>

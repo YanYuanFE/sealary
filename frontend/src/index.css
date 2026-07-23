@@ -206,3 +206,11 @@
 .sealed-mark {
     animation: seal-shimmer 3.2s ease-in-out infinite;
 }
+
+@media (prefers-reduced-motion: reduce) {
+    .reveal,
+    .reveal-blur,
+    .sealed-mark {
+        animation: none;
+    }
+}

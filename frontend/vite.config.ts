@@ -14,6 +14,7 @@ const ROUTES: Record<string, string> = {
   companies: '/api/companies.ts',
   employees: '/api/employees.ts',
   payments: '/api/payments.ts',
+  disclosures: '/api/disclosures.ts',
   persons: '/api/persons.ts',
   me: '/api/me.ts',
 }
