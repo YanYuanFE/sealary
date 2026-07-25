@@ -10,6 +10,7 @@ const nav = [
   { to: '/employer', label: 'Employer' },
   { to: '/employee', label: 'Employee' },
   { to: '/verify', label: 'Verify' },
+  { to: '/docs', label: 'Docs' },
 ]
 
 // 连钱包 → 绑定认证钱包 + SIWA 登录（拿会话 JWT；已有未过期会话则静默恢复，不弹签名）。
@@ -62,7 +63,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="mx-auto flex max-w-6xl flex-col items-start gap-1 px-5 py-8 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
           <span className="font-heading text-base text-foreground">Sealed salary, provable income.</span>
           <span className="font-mono text-xs">
-            built on Aleo · sealary_payroll.aleo · testnet
+            built on Aleo · sealary_payroll_v2.aleo · testnet
           </span>
         </div>
       </footer>

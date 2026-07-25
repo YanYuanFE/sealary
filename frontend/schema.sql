@@ -8,7 +8,7 @@ create table if not exists company (
   id            uuid primary key default gen_random_uuid(),
   employer_wallet text not null unique,          -- 雇主钱包地址（链上链下关联键）
   name          text not null,
-  region        text not null default 'EU',
+  region        text not null default 'EU',      -- 废弃：代码不再读写，靠 default 兜底；留列免迁移
   token_id      text not null,                   -- 薪资币 token_id（field），雇主自带
   symbol        text not null,
   decimals      int  not null,
@@ -64,6 +64,14 @@ create index if not exists idx_payment_company on payment(company_id);
 
 -- 发薪类型：salary=周期工资（Paid 徽章依据）| bonus=同期加发/临时付款（不占用 Paid）
 alter table payment add column if not exists kind text not null default 'salary';
+
+-- 被遗忘权改为「部分擦除」：原先删 person 会级联删掉 payment，把法定审计线索一并销毁。
+-- 改为只删 encryption_keys 行（DEK 消失→姓名密文永久不可解），person 行留下承载 payment 外键。
+-- key_ref 置空后 employees 的 inner join 落空，该员工自动从花名册消失，无需 deleted 标记。
+alter table person alter column key_ref drop not null;
+alter table person drop constraint if exists person_key_ref_fkey;
+alter table person add constraint person_key_ref_fkey
+  foreign key (key_ref) references encryption_keys(key_ref) on delete set null;
 
 -- 披露留痕（对标 PRD"谁在何时向谁披露了什么"）：员工每次 prove/disclose 记一条元数据。
 -- 只存 期数/接收方(自报)/tx——金额绝不进后端。

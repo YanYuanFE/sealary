@@ -36,6 +36,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (!companyId || !name || !walletAddress) return res.status(400).json({ error: 'companyId, name, walletAddress required' })
     if (!(await ownCompany(wallet, companyId))) return res.status(403).json({ error: 'not your company' })
 
+    // 这个地址在本公司是否已有行？key_ref is null = 曾被 crypto-shred（复活会恢复其历史发薪记录的关联，
+    // 合法——重新入职是新的处理依据 Art.6(1)(b)——但雇主该被告知，不能悄悄发生）。
+    const prior = await sql`select key_ref from person where company_id = ${companyId} and wallet_address = ${walletAddress}`
+    const status = prior.length === 0 ? 'created' : prior[0].key_ref === null ? 'revived' : 'updated'
+
     const dek = newDek()
     const keyRows = await sql`insert into encryption_keys (wrapped_key) values (${wrapKey(dek)}) returning key_ref`
     const keyRef = keyRows[0].key_ref
@@ -50,8 +55,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             tax_id_hmac = coalesce(excluded.tax_id_hmac, person.tax_id_hmac)
       returning id`
     const personId = personRows[0].id
-    await audit(wallet, 'employee.add', String(personId))
-    return res.json({ id: personId, walletAddress, name })
+    await audit(wallet, `employee.add.${status}`, String(personId))
+    return res.json({ id: personId, walletAddress, name, status })
   }
 
   return res.status(405).json({ error: 'method' })

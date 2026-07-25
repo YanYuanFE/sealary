@@ -16,7 +16,7 @@ Salaries themselves are configured as **employer-owned encrypted records** (`sea
 
 | Program | Purpose |
 |---|---|
-| [`sealary_payroll.aleo`](https://testnet.explorer.provable.com/program/sealary_payroll.aleo) | `pay` · `pay_batch` (4 per tx) · `prove_income` · `disclose` · `tier` |
+| [`sealary_payroll_v2.aleo`](https://testnet.explorer.provable.com/program/sealary_payroll_v2.aleo) | `pay` · `pay_batch` (4 per tx) · `prove_income` (verifier + nonce bound) · `disclose` · `tier` |
 | [`sealary_conf.aleo`](https://testnet.explorer.provable.com/program/sealary_conf.aleo) | `set_salary` · `update_salary` · `set_salary_batch` (8 per tx) |
 | [`token_registry.aleo`](https://testnet.explorer.provable.com/program/token_registry.aleo) | ARC-21 value layer — test stablecoin **zUSD** (`token_id = 7777field`, 6 decimals) |
 
@@ -55,7 +55,7 @@ What we trade away: no streaming/continuous accrual (UTXO model) — we batch pe
 
 ```
 contract/
-  sealary/        # sealary_payroll.aleo — pay / prove / disclose (+ tests, bootstrap.sh, verify_tier.sh)
+  sealary/        # sealary_payroll_v2.aleo — pay / prove / disclose (+ tests, bootstrap.sh, verify_tier.sh)
   sealary_conf/   # sealary_conf.aleo — encrypted salary configs
   spike/          # minimal cross-program transfer_private feasibility spike
 frontend/

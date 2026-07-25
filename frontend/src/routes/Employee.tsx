@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { toast } from 'sonner'
 import { KeyRound, ShieldCheck, ScanEye, Lock, Loader2, Download, Printer } from 'lucide-react'
@@ -8,14 +9,16 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter, DialogTrigger,
 } from '@/components/ui/dialog'
 import { PageHeader } from '@/components/PageHeader'
+import { GasBanner } from '@/components/GasBanner'
 import { SealedAmount } from '@/components/SealedAmount'
 import { TxLink } from '@/components/TxLink'
 import { TierBadge } from '@/components/TierBadge'
 import { SealMark } from '@/components/brand/SealMark'
 import { tierOf, period, shortAddr, money } from '@/lib/format'
-import { PROGRAM, proveIncomeOpts, discloseOpts, waitForTx } from '@/lib/aleo'
+import { PROGRAM, proveIncomeOpts, discloseOpts, waitForTx, newNonce } from '@/lib/aleo'
 import { fetchTokenInfo, toBase, fromBase } from '@/lib/units'
-import { getMe, listDisclosures, recordDisclosure, type Person, type Company, type Disclosure } from '@/lib/api'
+import { recordDisclosure, type Disclosure } from '@/lib/api'
+import { qk, useMe, useDisclosures, useCredits } from '@/lib/queries'
 import { downloadCsv, printDocument } from '@/lib/export'
 
 // 只取子组件真正用到的钱包方法（避免要求整个 WalletContextState）。
@@ -70,20 +73,12 @@ export function Employee() {
   const [decimals, setDecimals] = useState(6)
   const [symbol, setSymbol] = useState('zUSD')
   const [loading, setLoading] = useState(false)
-  const [identity, setIdentity] = useState<{ person: Person; company: Company } | null>(null)
-  const [log, setLog] = useState<Disclosure[]>([]) // 披露留痕（自己的）
+  const qc = useQueryClient()
+  const { data: identity } = useMe()
+  const { data: log = [] } = useDisclosures() // 披露留痕（自己的）
+  const { hasGas } = useCredits() // 手续费不足则禁掉 prove/disclose
 
-  const refreshLog = () => listDisclosures().then(setLog).catch(() => setLog([]))
-
-  useEffect(() => {
-    if (connected && address) {
-      getMe().then(setIdentity).catch(() => setIdentity(null))
-      refreshLog()
-    } else {
-      setIdentity(null)
-      setLog([])
-    }
-  }, [connected, address])
+  const refreshLog = () => { void qc.invalidateQueries({ queryKey: qk.disclosures(address ?? '') }) }
 
   async function decrypt() {
     if (!connected || !address || !requestRecords) {
@@ -119,13 +114,14 @@ export function Employee() {
         <Locked loading={loading} onUnlock={decrypt} />
       ) : (
         <div className="reveal space-y-8">
+          <GasBanner />
           <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
             <IdentityCard address={address!} name={identity?.person.name}
               employer={identity?.company.name} latest={stubs[0]} decimals={decimals} />
-            <ProvePanel latest={stubs[0]} decimals={decimals} symbol={symbol} onLogged={refreshLog}
+            <ProvePanel latest={stubs[0]} decimals={decimals} symbol={symbol} onLogged={refreshLog} hasGas={hasGas}
               wallet={{ connected, address, requestRecords, executeTransaction, transactionStatus }} />
           </div>
-          <Payslips stubs={stubs} decimals={decimals} symbol={symbol}
+          <Payslips stubs={stubs} decimals={decimals} symbol={symbol} hasGas={hasGas}
             employeeName={identity?.person.name} employerName={identity?.company.name} onLogged={refreshLog}
             wallet={{ connected, address, requestRecords, executeTransaction, transactionStatus }} />
         </div>
@@ -157,7 +153,7 @@ function DisclosureLog({ log }: { log: Disclosure[] }) {
         <tbody>
           {log.map((d) => (
             <tr key={d.id} className="border-b border-border/50 last:border-0 hover:bg-secondary/40">
-              <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">{new Date(d.createdAt).toLocaleDateString()}</td>
+              <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">{new Date(d.createdAt).toLocaleDateString('en-US')}</td>
               <td className="px-5 py-3.5">
                 {d.kind === 'prove'
                   ? <span className="text-proven">ZK proof · tier only</span>
@@ -223,16 +219,23 @@ function Line({ k, v }: { k: string; v: React.ReactNode }) {
 }
 
 // 核心差异化：输入门槛 -> 得到 tier，金额始终封着。
-function ProvePanel({ latest, decimals, symbol, wallet, onLogged }: {
-  latest?: Stub; decimals: number; symbol: string; wallet: Wallet; onLogged: () => void
+function ProvePanel({ latest, decimals, symbol, wallet, onLogged, hasGas }: {
+  latest?: Stub; decimals: number; symbol: string; wallet: Wallet; onLogged: () => void; hasGas: boolean
 }) {
-  const [threshold, setThreshold] = useState(8000)
-  const [busy, setBusy] = useState(false)
   const salary = latest ? fromBase(latest.amount, decimals) : 0
+  // 门槛的意义永远相对于工资单：写死 2000–30000 在薪资只有几 zUSD 时连最低档都够不着。
+  // 上限取 2× 薪资（tier 3 的边界），刚好让整条滑轨覆盖全部四档。
+  const sliderMax = Math.max(salary * 2, 1)
+  const [threshold, setThreshold] = useState(() => Math.round(salary) || 1)
+  const [busy, setBusy] = useState(false)
+  const [verifier, setVerifier] = useState('')
+  const [nonce, setNonce] = useState(newNonce) // 每次证明换一个，验证者也可覆盖成自己给的
   const tier = tierOf(salary, threshold)
+  const validVerifier = /^aleo1[a-z0-9]{58}$/.test(verifier)
 
   async function generate() {
     if (!latest) { toast.error('No payslip to prove against'); return }
+    if (!validVerifier) { toast.error('Enter the verifier’s aleo1… address'); return }
     const { connected, address, requestRecords, executeTransaction } = wallet
     if (!connected || !address || !executeTransaction || !requestRecords) {
       toast.error('Connect your wallet'); return
@@ -240,12 +243,14 @@ function ProvePanel({ latest, decimals, symbol, wallet, onLogged }: {
     setBusy(true)
     try {
       // §4.2：threshold 也转 base units，与链上 Paystub.amount 同口径，否则 tier 算错。
-      const res = await executeTransaction(proveIncomeOpts(latest.uid, toBase(threshold, decimals)))
+      const res = await executeTransaction(proveIncomeOpts(latest.uid, toBase(threshold, decimals), verifier, nonce))
       const tempId = res?.transactionId
       if (!tempId) { toast.error('Wallet returned no transaction id'); return }
       // 提交即放行；确认与披露留痕后台走（accepted 才记录，toast 跟进最终 tx id）。
       const toastId = toast.loading('Proof submitted — confirming on-chain…')
-      void confirmAndLog(wallet, 'prove', latest.period, tempId, undefined, toastId, onLogged)
+      // await 而不是 void：确认要几十秒，期间按钮必须保持禁用，否则会重复提交、白烧一笔手续费。
+      await confirmAndLog(wallet, 'prove', latest.period, tempId, shortAddr(verifier), toastId, onLogged)
+      setNonce(newNonce()) // 一个 nonce 只用一次
     } catch (e) {
       toast.error('Proof failed', { description: String((e as Error)?.message ?? e) })
     } finally {
@@ -266,14 +271,41 @@ function ProvePanel({ latest, decimals, symbol, wallet, onLogged }: {
       <label className="mt-5 block">
         <span className="mb-1.5 block text-sm font-medium">Threshold ({symbol})</span>
         <input
-          type="range" min={2000} max={30000} step={500}
-          value={threshold} onChange={(e) => setThreshold(Number(e.target.value))}
+          type="range" min={0} max={sliderMax} step={sliderMax / 200}
+          value={Math.min(threshold, sliderMax)} onChange={(e) => setThreshold(Number(e.target.value))}
           className="w-full accent-[oklch(0.5_0.09_152)]"
         />
-        <div className="mt-1 flex justify-between font-mono text-sm">
+        <div className="mt-1 flex items-center justify-between gap-2 font-mono text-sm">
           <span className="text-muted-foreground">≥</span>
-          <span className="font-semibold text-foreground">{money(threshold)}</span>
+          {/* 滑块给手感，输入框给精度——验证方要的门槛不一定落在滑轨的刻度上 */}
+          <input
+            type="number" min={0} step="any" value={threshold}
+            onChange={(e) => setThreshold(Math.max(0, Number(e.target.value)))}
+            className="w-32 rounded-md border border-border bg-card px-2 py-1 text-right font-mono text-sm font-semibold"
+          />
         </div>
+      </label>
+
+      <label className="mt-4 block">
+        <span className="mb-1.5 block text-sm font-medium">Verifier address</span>
+        <input
+          className="field font-mono text-xs" value={verifier} placeholder="aleo1… — who asked for this proof"
+          onChange={(e) => setVerifier(e.target.value.trim())}
+        />
+        <span className="mt-1 block text-xs text-muted-foreground">
+          Bound into the proof. Forwarded to anyone else it reads as invalid — they see a verifier that isn’t them.
+        </span>
+      </label>
+
+      <label className="mt-3 block">
+        <span className="mb-1.5 block text-sm font-medium">Nonce</span>
+        <input
+          className="field font-mono text-xs" value={nonce}
+          onChange={(e) => setNonce(e.target.value.trim())}
+        />
+        <span className="mt-1 block text-xs text-muted-foreground">
+          Freshness. Paste the one the verifier gave you, or send them this generated value first.
+        </span>
       </label>
 
       <div className="mt-5 flex items-center justify-between rounded-lg border border-border/70 bg-card px-4 py-3">
@@ -284,16 +316,17 @@ function ProvePanel({ latest, decimals, symbol, wallet, onLogged }: {
         <TierBadge tier={tier} />
       </div>
 
-      <Button className="mt-4 rounded-full" onClick={generate} disabled={busy || !latest}>
-        <ShieldCheck className="size-4" /> {busy ? 'Generating…' : 'Generate proof'}
+      <Button className="mt-4 rounded-full" onClick={generate} disabled={busy || !latest || !hasGas || !validVerifier}>
+        {busy ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
+        {busy ? 'Confirming on-chain…' : 'Generate proof'}
       </Button>
     </Card>
   )
 }
 
-function Payslips({ stubs, decimals, symbol, wallet, employeeName, employerName, onLogged }: {
+function Payslips({ stubs, decimals, symbol, wallet, employeeName, employerName, onLogged, hasGas }: {
   stubs: Stub[]; decimals: number; symbol: string; wallet: Wallet
-  employeeName?: string; employerName?: string; onLogged: () => void
+  employeeName?: string; employerName?: string; onLogged: () => void; hasGas: boolean
 }) {
   // 员工本机导出自己的 Paystub 历史（解密后数据，不经服务器）。
   async function exportCsv() {
@@ -359,7 +392,7 @@ function Payslips({ stubs, decimals, symbol, wallet, employeeName, employerName,
                     <Button variant="ghost" size="sm" className="rounded-full" onClick={() => printStub(s)} title="Print payslip (save as PDF)">
                       <Printer className="size-4" />
                     </Button>
-                    <DiscloseDialog stub={s} decimals={decimals} symbol={symbol} wallet={wallet} onLogged={onLogged} />
+                    <DiscloseDialog stub={s} decimals={decimals} symbol={symbol} wallet={wallet} onLogged={onLogged} hasGas={hasGas} />
                   </div>
                 </td>
               </tr>
@@ -371,8 +404,8 @@ function Payslips({ stubs, decimals, symbol, wallet, employeeName, employerName,
   )
 }
 
-function DiscloseDialog({ stub, decimals, symbol, wallet, onLogged }: {
-  stub: Stub; decimals: number; symbol: string; wallet: Wallet; onLogged: () => void
+function DiscloseDialog({ stub, decimals, symbol, wallet, onLogged, hasGas }: {
+  stub: Stub; decimals: number; symbol: string; wallet: Wallet; onLogged: () => void; hasGas: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [party, setParty] = useState('')
@@ -401,7 +434,7 @@ function DiscloseDialog({ stub, decimals, symbol, wallet, onLogged }: {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="rounded-full text-seal hover:bg-seal-soft/40 hover:text-seal">
+        <Button variant="ghost" size="sm" disabled={!hasGas} className="rounded-full text-seal hover:bg-seal-soft/40 hover:text-seal">
           <ScanEye className="size-4" /> Disclose
         </Button>
       </DialogTrigger>

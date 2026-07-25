@@ -6,7 +6,6 @@ import { authHeaders, authReady } from './auth'
 export type Company = {
   id: string
   name: string
-  region: string
   tokenId: string
   symbol: string
   decimals: number
@@ -47,8 +46,11 @@ export function listEmployees(companyId: string) {
   return req<Person[]>(`/employees?companyId=${encodeURIComponent(companyId)}`)
 }
 
+// status：created=新行 | updated=已存在，覆盖姓名 | revived=曾被擦除，复活后历史发薪记录重新具名。
+export type AddResult = Person & { status: 'created' | 'updated' | 'revived' }
+
 export function addEmployee(companyId: string, input: Omit<Person, 'id'>) {
-  return req<Person>('/employees', { method: 'POST', body: JSON.stringify({ companyId, ...input }) })
+  return req<AddResult>('/employees', { method: 'POST', body: JSON.stringify({ companyId, ...input }) })
 }
 
 // 发薪记录（仅元数据：谁/哪期/哪笔 tx——无金额，金额在链上加密）。

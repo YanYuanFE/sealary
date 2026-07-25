@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { toast } from 'sonner'
@@ -8,42 +9,29 @@ import { Card } from '@/components/ui/card'
 import { PageHeader } from '@/components/PageHeader'
 import { TokenCard } from '@/components/TokenCard'
 import { ConnectButton } from '@/components/ConnectButton'
-import { createCompany, getCompany, type Company } from '@/lib/api'
+import { createCompany } from '@/lib/api'
+import { qk, useCompany } from '@/lib/queries'
 import type { TokenInfo } from '@/lib/units'
-
-// 公司所在国：ISO-2 国家码（对齐 Paychain 的 country_code 做法——自由输入，datalist 只是提示）。
-const COUNTRIES: [string, string][] = [
-  ['ES', 'Spain'], ['DE', 'Germany'], ['FR', 'France'], ['IT', 'Italy'], ['NL', 'Netherlands'],
-  ['PT', 'Portugal'], ['IE', 'Ireland'], ['BE', 'Belgium'], ['AT', 'Austria'], ['PL', 'Poland'],
-  ['SE', 'Sweden'], ['DK', 'Denmark'], ['FI', 'Finland'], ['GB', 'United Kingdom'], ['CH', 'Switzerland'],
-  ['US', 'United States'], ['CA', 'Canada'], ['BR', 'Brazil'], ['MX', 'Mexico'], ['AR', 'Argentina'],
-  ['JP', 'Japan'], ['KR', 'South Korea'], ['SG', 'Singapore'], ['HK', 'Hong Kong'], ['AU', 'Australia'],
-  ['IN', 'India'], ['AE', 'UAE'], ['NG', 'Nigeria'], ['ZA', 'South Africa'],
-]
 
 export function CreateOrg() {
   const navigate = useNavigate()
   const { connected, address } = useWallet()
   const [name, setName] = useState('')
-  const [region, setRegion] = useState('ES') // ISO-2 国家码（DB 列仍叫 region）
   const [payDay, setPayDay] = useState(25) // 每月发薪日
   const [tokenId, setTokenId] = useState('')
   const [token, setToken] = useState<TokenInfo | null>(null)
-  const [existing, setExisting] = useState<Company | null>(null)
   const [busy, setBusy] = useState(false)
+  const qc = useQueryClient()
+  const { data: existing } = useCompany()
 
-  useEffect(() => {
-    if (connected && address) getCompany().then(setExisting).catch(() => setExisting(null))
-    else setExisting(null)
-  }, [connected, address])
-
-  const ready = connected && !!address && name.trim() !== '' && /^[A-Z]{2}$/.test(region) && !!token && !busy
+  const ready = connected && !!address && name.trim() !== '' && !!token && !busy
 
   async function submit() {
     if (!ready || !address || !token) return
     setBusy(true)
     try {
-      await createCompany({ name: name.trim(), region, tokenId: tokenId.trim(), symbol: token.symbol || token.name, decimals: token.decimals, payDay })
+      const created = await createCompany({ name: name.trim(), tokenId: tokenId.trim(), symbol: token.symbol || token.name, decimals: token.decimals, payDay })
+      qc.setQueryData(qk.company(address), created) // 免得 /employer 用旧的 null 缓存显示"还没有组织"
       toast.success(`Organization “${name.trim()}” created`, { description: `Payroll token ${token.symbol || token.name} · ${token.decimals} decimals` })
       navigate('/employer')
     } catch (e) {
@@ -79,16 +67,6 @@ export function CreateOrg() {
         <Card className="space-y-4 p-6">
           <Field label="Company name">
             <input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Northwind Labs" />
-          </Field>
-          <Field label="Country (ISO-2)">
-            <input
-              className="field font-mono uppercase" value={region} maxLength={2}
-              onChange={(e) => setRegion(e.target.value.toUpperCase().replace(/[^A-Z]/g, ''))}
-              placeholder="ES" list="iso-countries"
-            />
-            <datalist id="iso-countries">
-              {COUNTRIES.map(([code, label]) => <option key={code} value={code}>{label}</option>)}
-            </datalist>
           </Field>
           <Field label="Pay day (monthly)">
             <select className="field" value={payDay} onChange={(e) => setPayDay(Number(e.target.value))}>

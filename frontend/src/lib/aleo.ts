@@ -3,10 +3,11 @@ import { DecryptPermission } from '@provablehq/aleo-wallet-adaptor-core'
 
 // ── 链上配置 ──────────────────────────────────────────────
 export const NETWORK = Network.TESTNET
-export const PROGRAM = 'sealary_payroll.aleo' // pay + pay_batch + prove_income + disclose + tier
+export const PROGRAM = 'sealary_payroll_v2.aleo' // pay + pay_batch + prove_income + disclose + tier
 export const HR_PROGRAM = 'sealary_conf.aleo' // 雇主私有薪资配置（加密 record，后端不存薪资）
 export const DECRYPT = DecryptPermission.UponRequest
-export const CONNECT_PROGRAMS = [PROGRAM, HR_PROGRAM, 'token_registry.aleo']
+// credits.aleo 也要授权：手续费余额判断需要读私有 credits record，否则只能看到 public 那一半。
+export const CONNECT_PROGRAMS = [PROGRAM, HR_PROGRAM, 'token_registry.aleo', 'credits.aleo']
 
 // REST 查询端点（链上只读：mapping / program）。
 export const ENDPOINT = 'https://api.explorer.provable.com/v1'
@@ -14,6 +15,34 @@ export const API_BASE = `${ENDPOINT}/${NETWORK}`
 
 // 手续费（microcredits）。部署后按实际 execution 成本调。
 export const FEE = 1_000_000
+
+// 手续费余额（microcredits）= public mapping + 私有 credits record。钱包付费时两者都能用，
+// 只查一边会把有钱的钱包判成没钱。返回 null = 查不出来（网络问题），调用方此时【不应】拦截——
+// 误拦一个本可发出的交易，比放行一个注定失败的更糟。
+type RequestRecords = (program: string, includePlaintext: boolean, statusFilter?: 'unspent') => Promise<unknown[]>
+
+export async function fetchCredits(address: string, requestRecords: RequestRecords): Promise<bigint | null> {
+  let total: bigint | null = null
+  try {
+    const res = await fetch(`${API_BASE}/program/credits.aleo/mapping/account/${address}?t=${Date.now()}`, {
+      headers: { 'Cache-Control': 'no-cache' },
+    })
+    if (!res.ok) return null
+    const body = (await res.json()) as unknown // 命中：'123u64'；未命中：null（余额为 0，不是查询失败）
+    total = typeof body === 'string' ? BigInt(body.match(/^(\d+)u64$/)?.[1] ?? '0') : 0n
+  } catch {
+    return null // 网络失败 → 不确定 → 不拦截
+  }
+  try {
+    for (const r of await requestRecords('credits.aleo', true, 'unspent')) {
+      const m = JSON.stringify(r).match(/microcredits:\s*(\d+)u64/)
+      if (m) total += BigInt(m[1])
+    }
+  } catch {
+    // 钱包未授权 credits.aleo（老连接）→ 只按 public 判断，可能偏低
+  }
+  return total
+}
 
 // 区块浏览器交易链接（testnet）。
 export const EXPLORER_TX = (txId: string) => `https://testnet.explorer.provable.com/transaction/${txId}`
@@ -28,11 +57,18 @@ export async function waitForTx(
   tempId: string,
 ): Promise<TxOutcome> {
   const deadline = Date.now() + 180_000 // ponytail: 3min 定值，testnet 通常几十秒落链；不够真机再调
+  let acceptedAt: number | null = null // 已 accepted 但链上 id 尚未生成的起点
   while (Date.now() < deadline) {
     try {
       const r = await transactionStatus(tempId)
       const status = r.status.toLowerCase()
-      if (status === 'accepted') return { status: 'accepted', txId: r.transactionId ?? tempId }
+      // transactionId 是「已生成才有」：accepted 后再宽限 20s 等它，否则钱包临时 id 会被当成链上 id
+      // 存进发薪历史，explorer 永远打不开。等不到就照记——漏记会导致重复付款，比断链严重。
+      if (status === 'accepted') {
+        if (r.transactionId) return { status: 'accepted', txId: r.transactionId }
+        acceptedAt ??= Date.now()
+        if (Date.now() - acceptedAt > 20_000) return { status: 'accepted', txId: tempId }
+      }
       if (status === 'rejected' || status === 'failed') return { status, txId: r.transactionId ?? tempId, error: r.error }
     } catch {
       // 刚广播查不到 / 网络抖动 → 继续轮询
@@ -47,16 +83,29 @@ export async function waitForTx(
 // uid 来自 requestRecords 返回的 RecordEnvelope.uid（Shield 等 conforming 钱包填充）。
 
 // prove_income(p: Paystub, public threshold: u128)
-export function proveIncomeOpts(paystubUid: string, threshold: number | bigint): TransactionOptions {
+// prove_income(p: Paystub, threshold, verifier, nonce)
+// verifier/nonce 公开回吐：转发给第三方时 verifier 对不上，旧证明重放时 nonce 对不上。
+export function proveIncomeOpts(
+  paystubUid: string, threshold: number | bigint, verifier: string, nonce: string,
+): TransactionOptions {
   return {
     program: PROGRAM,
     function: 'prove_income',
     inputs: [
       { type: 'record', program: PROGRAM, recordname: 'Paystub', uid: paystubUid },
       `${threshold}u128`,
+      verifier,
+      nonce,
     ],
     fee: FEE,
   }
+}
+
+// 每次证明用一个新 nonce（field）。crypto.getRandomValues → 十进制 field 字面量。
+export function newNonce(): string {
+  const b = new Uint8Array(16)
+  crypto.getRandomValues(b)
+  return `${[...b].reduce((n, x) => (n << 8n) | BigInt(x), 0n)}field`
 }
 
 // disclose(p: Paystub)

@@ -19,7 +19,7 @@ fn tier_of(amount: u128, threshold: u128) -> u8 {
     return tier;
 }
 
-program sealary_payroll.aleo {
+program sealary_payroll_v2.aleo {
     @noupgrade
     constructor() {}
 
@@ -81,12 +81,17 @@ program sealary_payroll.aleo {
         return (c3, r0, r1, r2, r3, s0, s1, s2, s3, final { settle4(f0, f1, f2, f3); });
     }
 
-    // 收入证明：输入私有凭证 + 公开门槛，公开输出 等级 + 雇主 + 代币 + 期数。
-    // 验证者据此确认「该 tier 是针对自己提交的 threshold、由可信雇主签发的指定代币工资单算出」，
-    // 否则员工可用 threshold=1 或自造代币的空气工资单伪造高档位。回吐凭证给 owner。
-    fn prove_income(p: Paystub, public threshold: u128)
-        -> (public u8, public address, public field, public u32, Paystub) {
-        return (tier_of(p.amount, threshold), p.employer, p.token_id, p.period, p);
+    // 收入证明：输入私有凭证 + 公开门槛/验证者/nonce，公开输出 等级 + 雇主 + 代币 + 期数 + 验证者 + nonce。
+    // 四项绑定各挡一种伪造：
+    //   threshold — 否则员工用 threshold=1 就能证出高档位；
+    //   employer/token_id — 否则可自造空气工资单或山寨币工资单；
+    //   verifier — 这份证明出给谁。转发给第三方时对方一看 verifier 不是自己就作废。
+    //   nonce — 验证者当次请求的随机数。旧证明重放不了，也限制了"换 threshold 反复证明二分逼出金额"。
+    // 出示人地址【不】公开：record 只有 owner 能花费，能生成证明的必然是持有人；公开地址只会把
+    // (员工, 雇主, 期数) 的雇佣关系写上链，白送掉收款人匿名。回吐凭证给 owner，可反复使用。
+    fn prove_income(p: Paystub, public threshold: u128, public verifier: address, public nonce: field)
+        -> (public u8, public address, public field, public u32, public address, public field, Paystub) {
+        return (tier_of(p.amount, threshold), p.employer, p.token_id, p.period, verifier, nonce, p);
     }
 
     // 纯工具：给定明文金额与门槛返回等级。不涉隐私（入参均为调用方明文），

@@ -11,15 +11,19 @@ export async function sha256Hex(text: string): Promise<string> {
 }
 
 // 完整性尾行：hash 覆盖其上全部数据行（验证 = 去掉尾行后 sha256 比对），meta 为批次元数据。
+// kv 用 ` · ` 分隔而不是 JSON 引号：值里的引号会强制整行被 CSV 转义，尾行就没法直接读了。
 export async function csvFooter(body: string, meta: Record<string, string> = {}): Promise<string> {
-  const kv = Object.entries(meta).map(([k, v]) => `${k}=${JSON.stringify(v)}`).join(' ')
-  return `# sealary-export ${kv}${kv ? ' ' : ''}sha256=${await sha256Hex(body)}`
+  const kv = Object.entries(meta).map(([k, v]) => `${k}=${v}`).join(' · ')
+  return `# sealary-export ${kv}${kv ? ' · ' : ''}sha256=${await sha256Hex(body)}`
 }
 
 // 生成并下载 CSV，尾行附 SHA-256 + 批次元数据（防篡改的可验证导出）。
 export async function downloadCsv(filename: string, rows: string[][], meta: Record<string, string> = {}) {
   const body = csvString(rows)
-  const csv = body + '\n' + (await csvFooter(body, { ...meta, rows: String(rows.length - 1), generated: new Date().toISOString() }))
+  const footer = await csvFooter(body, { ...meta, rows: String(rows.length - 1), generated: new Date().toISOString() })
+  // 尾行也过一遍 csvString：公司名/备注里的逗号会把它拆成多列，表格软件整张表都跟着错列。
+  // 正常情况下不含逗号引号 → 原样输出，仍是人眼可读的一行。
+  const csv = body + '\n' + csvString([[footer]])
   const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv' }))
   const a = document.createElement('a')
   a.href = url

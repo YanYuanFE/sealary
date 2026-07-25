@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { toast } from 'sonner'
-import { Eye, EyeOff, Send, UserPlus, Upload, Download, Coins, Building2, Loader2, Trash2, Printer, Gift, FileText } from 'lucide-react'
+import { Eye, EyeOff, Send, UserPlus, Upload, Download, Coins, Building2, Loader2, Trash2, Printer, Gift, FileText, Copy, Pencil } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -12,14 +13,33 @@ import { PageHeader, StatCard } from '@/components/PageHeader'
 import { SealedAmount } from '@/components/SealedAmount'
 import { TxLink } from '@/components/TxLink'
 import { ConnectButton } from '@/components/ConnectButton'
+import { Loading } from '@/components/Loading'
+import { GasBanner } from '@/components/GasBanner'
 import { Card } from '@/components/ui/card'
 import { shortAddr, money, period } from '@/lib/format'
 import { payOpts, payBatchOpts, PAY_BATCH, setSalaryOpts, updateSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM, waitForTx } from '@/lib/aleo'
 import { toBase, fromBase } from '@/lib/units'
 import { downloadCsv, printDocument } from '@/lib/export'
-import { getCompany, listEmployees, addEmployee, forgetEmployee, listPayments, recordPayment, type Company, type Person, type Payment } from '@/lib/api'
+import { addEmployee, forgetEmployee, recordPayment, type AddResult, type Company, type Person, type Payment } from '@/lib/api'
+import { qk, useCompany, useCredits, useEmployees, usePayments } from '@/lib/queries'
 
 const isAleoAddr = (a: string) => /^aleo1[a-z0-9]{58}$/.test(a)
+
+// 添加员工的去向说明：地址已存在时 upsert 命中旧行，这有隐私含义（复活会让历史发薪记录重新具名），
+// 不能悄悄发生。created 无需说明。
+const ADD_NOTE: Record<AddResult['status'], string | undefined> = {
+  created: undefined,
+  updated: 'This address was already on the roster — its name was updated.',
+  revived: 'This address was previously erased. Re-adding restores the link to their past payment records.',
+}
+
+// 导入模板：表头 + 两行示例（地址为占位符，原样导入会被 parseCsv 判为无效行而跳过）。
+// ponytail: data: URL + <a download>，不走 downloadCsv —— 后者附 sha256 尾行，反而破坏再导入。
+const TEMPLATE_CSV = [
+  'name,address,salary',
+  'Ada Lovelace,aleo1replace-with-employee-address,5000',
+  'Alan Turing,aleo1replace-with-employee-address,6200',
+].join('\n')
 
 type CsvRow = { name: string; address: string; salary: number }
 
@@ -47,11 +67,14 @@ function parseCsv(text: string): { rows: CsvRow[]; errors: string[] } {
 const now = new Date()
 const CURRENT_PERIOD = now.getFullYear() * 100 + (now.getMonth() + 1)
 
-// 距下个发薪日的倒计时文案：今天 → "Today"，否则 "in Nd"（本月已过则滚到下月同日）。
-function payrollCountdown(payDay: number, from: Date = now): string {
+// 距下个发薪日的文案：今天 → "Today"，否则 "in Nd"（本月已过则滚到下月同日）。
+// allPaid=本期人人已发：跳到下一期并直接给日期——此时倒数到 "Today" 是假信号（按钮已灰），
+// 而 "in 31d" 不如 "Aug 25" 直观。payDay 限 1-28（CreateOrg 的 select），跨月不会溢出到下下月。
+function payrollCountdown(payDay: number, allPaid: boolean, from: Date = now): string {
   const today = new Date(from.getFullYear(), from.getMonth(), from.getDate())
   const next = new Date(from.getFullYear(), from.getMonth(), payDay)
-  if (next < today) next.setMonth(next.getMonth() + 1)
+  if (next < today || allPaid) next.setMonth(next.getMonth() + 1)
+  if (allPaid) return next.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
   const days = Math.round((next.getTime() - today.getTime()) / 86_400_000)
   return days === 0 ? 'Today' : `in ${days}d`
 }
@@ -120,14 +143,51 @@ async function fetchSalaries(requestRecords: Wallet['requestRecords']): Promise<
   }
 }
 
+// 链上 accepted 之后，钱包还要扫链才发现那条新 SalaryConfig——这段延迟没有状态可查，
+// 只能轮询到真的读出新金额为止（猜一个固定延迟必然要么太早要么太久）。
+// 返回 false = 到点还没读到，调用方据此提示"稍后刷新"，而不是假装已经好了。
+async function waitForSalary(
+  requestRecords: Wallet['requestRecords'], address: string, expected: bigint,
+): Promise<boolean> {
+  const deadline = Date.now() + 60_000
+  while (Date.now() < deadline) {
+    if ((await fetchSalaries(requestRecords))[address]?.amount === expected) return true
+    await new Promise((r) => setTimeout(r, 2_000))
+  }
+  return false
+}
+
+// 薪资上链确认：executeTransaction 只是提交，SalaryConfig 要落链【且被钱包索引】后才读得到。
+// 后台跑 + toast 跟进（不阻塞弹窗关闭，与发薪流程同一套做法）。
+// expect 为 null（批量导入，一次多人）时只等链上 accepted，不逐个校验金额。
+async function sealSalary(
+  wallet: Pick<Wallet, 'transactionStatus' | 'requestRecords'>, tempId: string,
+  expect: { address: string; amount: bigint } | null, onDone: () => void,
+): Promise<void> {
+  const toastId = toast.loading('Sealing salary on-chain…')
+  const fin = await waitForTx(wallet.transactionStatus, tempId)
+  if (fin.status === 'pending') {
+    toast.warning('Still sealing — salary not updated yet', {
+      id: toastId, description: 'The roster will keep showing the old amount until it lands.',
+    })
+    return
+  }
+  if (fin.status !== 'accepted') {
+    toast.error('Salary rejected on-chain', { id: toastId, description: fin.error ?? 'The roster still shows the previous amount.' })
+    return
+  }
+  toast.loading('Sealed — waiting for your wallet to pick it up…', { id: toastId })
+  const visible = expect ? await waitForSalary(wallet.requestRecords, expect.address, expect.amount) : true
+  onDone()
+  if (visible) toast.success('Salary sealed on-chain', { id: toastId, description: <TxLink txId={fin.txId} /> })
+  else toast.warning('Sealed on-chain, but your wallet has not indexed it yet', {
+    id: toastId, description: 'The roster still shows the old amount — refresh in a moment.',
+  })
+}
+
 export function Employer() {
   const { connected, address, executeTransaction, requestRecords, transactionStatus } = useWallet()
-  const [company, setCompany] = useState<Company | null | undefined>(undefined) // undefined=加载中
-
-  useEffect(() => {
-    if (connected && address) getCompany().then(setCompany).catch(() => setCompany(null))
-    else setCompany(null)
-  }, [connected, address])
+  const { data: company, isPending } = useCompany()
 
   if (!connected || !address) {
     return (
@@ -136,7 +196,7 @@ export function Employer() {
       </Gate>
     )
   }
-  if (company === undefined) {
+  if (isPending) {
     return <Gate icon={<Loader2 className="size-8 animate-spin text-seal" />} text="Loading your organization…">{null}</Gate>
   }
   if (!company) {
@@ -164,22 +224,26 @@ function Console({ company, address, executeTransaction, requestRecords, transac
   executeTransaction: Wallet['executeTransaction']; requestRecords: Wallet['requestRecords']
   transactionStatus: Wallet['transactionStatus']
 }) {
-  const [roster, setRoster] = useState<Person[]>([])
-  const [salaries, setSalaries] = useState<Record<string, SalaryCfg>>({}) // 地址 → 薪资(base)+uid，来自链上 SalaryConfig
-  const [payments, setPayments] = useState<Payment[]>([]) // 发薪记录（后端元数据，无金额）
   const [reveal, setReveal] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [balance, setBalance] = useState<number | null>(null)
   const [removing, setRemoving] = useState<Person | null>(null) // 待确认移除的员工
   const [shredding, setShredding] = useState(false)
   const [bonusFor, setBonusFor] = useState<Person | null>(null) // 待单笔付款的员工
+  const [editing, setEditing] = useState<Person | null>(null)   // 待编辑的员工
 
-  useEffect(() => {
-    listEmployees(company.id).then(setRoster).catch(() => setRoster([]))
-    fetchSalaries(requestRecords).then(setSalaries).catch(() => setSalaries({}))
-    fetchBalance(requestRecords, company.tokenId, company.decimals).then(setBalance)
-    listPayments(company.id).then(setPayments).catch(() => setPayments([]))
-  }, [company.id, requestRecords, company.tokenId, company.decimals])
+  const qc = useQueryClient()
+  const { hasGas } = useCredits() // 手续费不足则禁掉一切链上入口
+  const { data: roster = [], isPending: loading } = useEmployees(company.id)
+  const { data: payments = [] } = usePayments(company.id) // 发薪记录（后端元数据，无金额）
+  // 链上 record 读取也走 query：付款/调薪后 invalidate 即重取，与后端数据同一套失效逻辑。
+  const { data: salaries = {} } = useQuery({ // 地址 → 薪资(base)+uid，来自链上 SalaryConfig
+    queryKey: qk.salaries(address),
+    queryFn: () => fetchSalaries(requestRecords),
+  })
+  const { data: balance = null } = useQuery({
+    queryKey: qk.balance(address, company.tokenId),
+    queryFn: () => fetchBalance(requestRecords, company.tokenId, company.decimals),
+  })
 
   // Paid = 本期已有【周期工资】记录（bonus 不占用——同期可加发，月度批仍会包含此人）。
   const paidIds = useMemo(
@@ -200,15 +264,22 @@ function Console({ company, address, executeTransaction, requestRecords, transac
     [pending, salaries],
   )
   const batchN = Math.min(payable.length, PAY_BATCH) // 本批一笔发多少人
+  const allPaid = roster.length > 0 && pending.length === 0 // 空花名册不算"已发完"
   const sum = (list: Person[]) => list.reduce((s, e) => s + (salaryOf(e) ?? 0), 0)
   const payrollTotal = sum(roster)
   const pendingTotal = sum(pending)
   const batchTotal = sum(payable.slice(0, PAY_BATCH)) // 本批总额（余额预警用）
 
   function refresh() {
-    listEmployees(company.id).then(setRoster).catch(() => {})
-    fetchSalaries(requestRecords).then(setSalaries).catch(() => {})
-    listPayments(company.id).then(setPayments).catch(() => {})
+    void qc.invalidateQueries({ queryKey: qk.employees(company.id) })
+    void qc.invalidateQueries({ queryKey: qk.salaries(address) })
+    void qc.invalidateQueries({ queryKey: qk.payments(company.id) })
+  }
+
+  // 付款后：记录变了、链上余额也变了。
+  function refreshAfterPay() {
+    void qc.invalidateQueries({ queryKey: qk.payments(company.id) })
+    void qc.invalidateQueries({ queryKey: qk.balance(address, company.tokenId) })
   }
 
   // 被遗忘权：后端删身份 + crypto-shred，然后链上作废 SalaryConfig（update_salary→0 消费旧 record，
@@ -293,9 +364,8 @@ function Console({ company, address, executeTransaction, requestRecords, transac
         return
       }
       await recordPayment(company.id, CURRENT_PERIOD, fin.txId, [person.id], 'bonus')
-        .then(() => listPayments(company.id).then(setPayments))
         .catch(() => toast.warning('Paid on-chain, but saving history failed', { description: 'It will not appear in Payment history.' }))
-      fetchBalance(requestRecords, company.tokenId, company.decimals).then(setBalance)
+      refreshAfterPay()
       toast.success(`Bonus sealed → ${person.name}`, { id: toastId, description: <TxLink txId={fin.txId} /> })
     } catch (e) {
       toast.error('Bonus failed', { description: String((e as Error)?.message ?? e) })
@@ -348,9 +418,8 @@ function Console({ company, address, executeTransaction, requestRecords, transac
       }
       // 发薪历史记后端（只元数据：人/期/最终 tx id——金额绝不进后端）。链上已成功，落库失败仅提示。
       await recordPayment(company.id, CURRENT_PERIOD, fin.txId, targets.map((t) => t.id))
-        .then(() => listPayments(company.id).then(setPayments))
         .catch(() => toast.warning('Paid on-chain, but saving history failed', { description: 'It will not appear in Payment history.' }))
-      fetchBalance(requestRecords, company.tokenId, company.decimals).then(setBalance) // 找零已变，刷新余额
+      refreshAfterPay() // 找零已变，余额一并刷新
       toast.success(`Sealed pay → ${targets.length} employee${targets.length > 1 ? 's' : ''}`, {
         id: toastId,
         description: (
@@ -380,15 +449,19 @@ function Console({ company, address, executeTransaction, requestRecords, transac
             </Button>
             <ImportCsv
               companyId={company.id} tokenId={company.tokenId} decimals={company.decimals}
-              salaries={salaries} executeTransaction={executeTransaction} onAdded={refresh}
+              salaries={salaries} executeTransaction={executeTransaction} transactionStatus={transactionStatus}
+              requestRecords={requestRecords} onAdded={refresh} hasGas={hasGas}
             />
             <AddEmployee
               companyId={company.id} tokenId={company.tokenId} symbol={company.symbol} decimals={company.decimals}
-              salaries={salaries} executeTransaction={executeTransaction} onAdded={refresh}
+              salaries={salaries} executeTransaction={executeTransaction} transactionStatus={transactionStatus} requestRecords={requestRecords}
+              onAdded={refresh} editing={editing} onCloseEdit={() => setEditing(null)} hasGas={hasGas}
             />
           </>
         }
       />
+
+      <GasBanner />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label="Payroll token" hint={shortAddr(company.tokenId, 6, 6)}>
@@ -396,11 +469,11 @@ function Console({ company, address, executeTransaction, requestRecords, transac
             <Coins className="size-5 text-seal" /> {company.symbol}
           </span>
         </StatCard>
-        <StatCard label="Funded" hint={balance === null ? 'on-chain' : 'unspent balance'}>
+        <StatCard label="Wallet balance" hint={balance === null ? 'reading wallet…' : 'unspent private records'}>
           {balance === null ? <SealedAmount amount={0} revealed={false} size="md" token={company.symbol} /> : <SealedAmount amount={balance} revealed={reveal} size="md" token={company.symbol} />}
         </StatCard>
-        <StatCard label="Next payroll" hint={`${period(CURRENT_PERIOD)} · day ${company.payDay} · ${roster.length} employees`}>
-          {payrollCountdown(company.payDay)}
+        <StatCard label="Next payroll" hint={`${allPaid ? `${period(CURRENT_PERIOD)} all paid` : period(CURRENT_PERIOD)} · day ${company.payDay} · ${roster.length} employees`}>
+          {payrollCountdown(company.payDay, allPaid)}
         </StatCard>
         <StatCard label="Pending" hint={`${pending.length} unpaid`}>
           <SealedAmount amount={pendingTotal} revealed={reveal} size="md" token={company.symbol} />
@@ -418,11 +491,13 @@ function Console({ company, address, executeTransaction, requestRecords, transac
               {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               {reveal ? 'Seal' : 'Reveal'}
             </Button>
-            <RunBatchDialog batchN={batchN} payableN={payable.length} total={pendingTotal} batchTotal={batchTotal} balance={balance} reveal={reveal} onConfirm={runBatch} busy={busy} token={company.symbol} />
+            <RunBatchDialog batchN={batchN} payableN={payable.length} total={pendingTotal} batchTotal={batchTotal} balance={balance} reveal={reveal} onConfirm={runBatch} busy={busy} token={company.symbol} hasGas={hasGas} />
           </div>
         </div>
 
-        {roster.length === 0 ? (
+        {loading ? (
+          <Loading label="Loading roster…" />
+        ) : roster.length === 0 ? (
           <p className="px-5 py-10 text-center text-sm text-muted-foreground">No employees yet — add one to run payroll.</p>
         ) : (
           <table className="w-full text-sm">
@@ -443,7 +518,19 @@ function Console({ company, address, executeTransaction, requestRecords, transac
                     <td className="px-5 py-3.5">
                       <div className="font-medium text-foreground">{e.name}</div>
                     </td>
-                    <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">{shortAddr(e.walletAddress)}</td>
+                    <td className="px-5 py-3.5">
+                      <button
+                        onClick={() => navigator.clipboard.writeText(e.walletAddress).then(
+                          () => toast.success('Address copied'),
+                          () => toast.error('Copy failed'),
+                        )}
+                        title={e.walletAddress}
+                        className="group/addr inline-flex items-center gap-1.5 font-mono text-xs text-muted-foreground transition-colors hover:text-seal"
+                      >
+                        {shortAddr(e.walletAddress)}
+                        <Copy className="size-3 opacity-0 transition-opacity group-hover/addr:opacity-100" />
+                      </button>
+                    </td>
                     <td className="px-5 py-3.5 text-right">
                       {s == null
                         ? <span className="font-mono text-xs text-muted-foreground">— sealing…</span>
@@ -456,7 +543,10 @@ function Console({ company, address, executeTransaction, requestRecords, transac
                     </td>
                     <td className="px-2 py-3.5 text-right">
                       <div className="flex justify-end">
-                        <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-seal" onClick={() => setBonusFor(e)} disabled={!isAleoAddr(e.walletAddress)} aria-label={`One-off payment to ${e.name}`} title="One-off payment (bonus)">
+                        <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-seal" onClick={() => setEditing(e)} aria-label={`Edit ${e.name}`} title="Edit name / salary">
+                          <Pencil className="size-4" />
+                        </Button>
+                        <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-seal" onClick={() => setBonusFor(e)} disabled={!isAleoAddr(e.walletAddress) || !hasGas} aria-label={`One-off payment to ${e.name}`} title="One-off payment (bonus)">
                           <Gift className="size-4" />
                         </Button>
                         <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-destructive" onClick={() => setRemoving(e)} aria-label={`Remove ${e.name}`}>
@@ -478,9 +568,11 @@ function Console({ company, address, executeTransaction, requestRecords, transac
           <DialogHeader>
             <DialogTitle className="font-heading text-xl">Remove {removing?.name}?</DialogTitle>
             <DialogDescription>
-              Deletes their identity and destroys its encryption key (crypto-shred) — the stored ciphertext becomes
-              permanently unreadable (GDPR right to be forgotten). Their sealed on-chain salary config is voided too
-              (one wallet approval). Paystubs already issued belong to the employee and stay theirs.
+              Destroys their encryption key (crypto-shred) — the stored name becomes permanently unreadable and they
+              leave the roster (GDPR right to be forgotten). Past payment records stay, now anonymous: period and
+              transaction id only, no name, no amount — payroll history is a legal record employers must keep
+              (GDPR Art. 17(3)(b)). Their sealed on-chain salary config is voided too (one wallet approval).
+              Paystubs already issued belong to the employee and stay theirs.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
@@ -556,7 +648,7 @@ function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol, 
     }
     await downloadCsv(`sealary-report-${companyName.replace(/\s+/g, '-')}.csv`, rows, {
       company: companyName,
-      note: 'aggregated per period, no identities; totals from current on-chain SalaryConfig; bonus amounts stay sealed and are excluded',
+      note: 'aggregated per period; no identities; totals from current on-chain SalaryConfig; bonus amounts stay sealed and are excluded',
     })
     toast.success('Aggregated report exported', { description: 'Per-period totals only — no names, no individual amounts.' })
   }
@@ -627,7 +719,7 @@ function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol, 
                   <TxLink txId={first.txId} />
                 </td>
                 <td className="px-5 py-3.5 text-right font-mono text-xs text-muted-foreground">
-                  {new Date(first.createdAt).toLocaleDateString()}
+                  {new Date(first.createdAt).toLocaleDateString('en-US')}
                 </td>
                 <td className="px-5 py-3.5 text-right">
                   <Button variant="ghost" size="sm" className="rounded-full" onClick={() => printReceipt(ps)} title="Print receipt (save as PDF)">
@@ -644,10 +736,10 @@ function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol, 
 }
 
 function RunBatchDialog(
-  { batchN, payableN, total, batchTotal, balance, reveal, onConfirm, busy, token }:
+  { batchN, payableN, total, batchTotal, balance, reveal, onConfirm, busy, token, hasGas }:
   {
     batchN: number; payableN: number; total: number; batchTotal: number; balance: number | null
-    reveal: boolean; onConfirm: () => void | Promise<void>; busy: boolean; token: string
+    reveal: boolean; onConfirm: () => void | Promise<void>; busy: boolean; token: string; hasGas: boolean
   },
 ) {
   const [open, setOpen] = useState(false)
@@ -656,7 +748,7 @@ function RunBatchDialog(
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="rounded-full" disabled={batchN === 0 || busy}>
+        <Button className="rounded-full" disabled={batchN === 0 || busy || !hasGas}>
           <Send className="size-4" /> {busy ? 'Confirming…' : `Pay batch${batchN > 0 ? ` (${batchN})` : ''}`}
         </Button>
       </DialogTrigger>
@@ -700,18 +792,38 @@ function Row({ k, v, mono }: { k: string; v: string; mono?: boolean }) {
   )
 }
 
-function AddEmployee({ companyId, tokenId, symbol, decimals, salaries, executeTransaction, onAdded }: {
+// 新增 / 编辑同一个对话框：两者的落地路径完全一样（后端 upsert 姓名 + 链上 set/update 薪资），
+// editing 只改预填、锁地址和文案。editing != null 时由外部控制开关。
+function AddEmployee({ companyId, tokenId, symbol, decimals, salaries, executeTransaction, transactionStatus, requestRecords, onAdded, editing, onCloseEdit, hasGas }: {
   companyId: string; tokenId: string; symbol: string; decimals: number
   salaries: Record<string, SalaryCfg>
-  executeTransaction: Wallet['executeTransaction']; onAdded: () => void
+  executeTransaction: Wallet['executeTransaction']; transactionStatus: Wallet['transactionStatus']
+  requestRecords: Wallet['requestRecords']; onAdded: () => void
+  editing: Person | null; onCloseEdit: () => void; hasGas: boolean
 }) {
-  const [open, setOpen] = useState(false)
+  const [selfOpen, setSelfOpen] = useState(false)
   const [name, setName] = useState('')
   const [salary, setSalary] = useState('')
   const [address, setAddress] = useState('')
   const [busy, setBusy] = useState(false)
 
+  const open = selfOpen || !!editing
   const validAddr = isAleoAddr(address)
+
+  // 改地址等于换人（会把历史发薪记录挪到另一个人头上），编辑时锁死。
+  useEffect(() => {
+    if (!editing) return
+    const cfg = salaries[editing.walletAddress]
+    setName(editing.name)
+    setAddress(editing.walletAddress)
+    setSalary(cfg ? String(fromBase(cfg.amount, decimals)) : '')
+  }, [editing, salaries, decimals])
+
+  function close() {
+    setSelfOpen(false)
+    if (editing) onCloseEdit()
+    setName(''); setSalary(''); setAddress('')
+  }
 
   async function submit() {
     if (!name || !salary) return
@@ -722,53 +834,73 @@ function AddEmployee({ companyId, tokenId, symbol, decimals, salaries, executeTr
     setBusy(true)
     try {
       // 1) 后端只存身份（name/address），不含薪资。
-      await addEmployee(companyId, { name, walletAddress: address })
+      const added = await addEmployee(companyId, { name, walletAddress: address })
       // 2) 薪资写成链上加密 SalaryConfig（只雇主能解，后端永不接触）。
       //    已有配置 → update_salary 消费旧 record（防新旧并存按旧薪资发钱）；否则 set_salary。
       const old = salaries[address]
       const base = toBase(Number(salary), decimals)
-      await executeTransaction(old ? updateSalaryOpts(old.uid, base) : setSalaryOpts(address, tokenId, base))
-      toast.success(`${name} added · salary sealed on-chain`)
-      setName(''); setSalary(''); setAddress(''); setOpen(false)
-      onAdded()
+      // 编辑时薪资没动就别发链上交易——白花 gas 还多一次钱包审批。
+      const salaryChanged = !old || old.amount !== base
+      let tempId: string | undefined
+      if (salaryChanged) {
+        const res = await executeTransaction(old ? updateSalaryOpts(old.uid, base) : setSalaryOpts(address, tokenId, base))
+        tempId = res?.transactionId
+      }
+      toast.success(
+        editing ? `${name} updated` : `${name} added`,
+        { description: editing ? (salaryChanged ? undefined : 'Name only — salary unchanged.') : ADD_NOTE[added.status] },
+      )
+      close()
+      onAdded() // 后端姓名立刻生效
+      // 薪资在链上：executeTransaction 只是提交，此刻 requestRecords 读回的还是旧 SalaryConfig。
+      // 不等确认就收工，界面会显示改前的金额（编辑）或 "— sealing…"（新增），看着像没生效。
+      if (tempId) void sealSalary({ transactionStatus, requestRecords }, tempId, { address, amount: base }, onAdded)
     } catch (e) {
-      toast.error('Add failed', { description: String((e as Error)?.message ?? e) })
+      toast.error(editing ? 'Update failed' : 'Add failed', { description: String((e as Error)?.message ?? e) })
     } finally {
       setBusy(false)
     }
   }
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={open} onOpenChange={(v) => { if (!v) close(); else setSelfOpen(true) }}>
       <DialogTrigger asChild>
-        <Button className="rounded-full"><UserPlus className="size-4" /> Add employee</Button>
+        <Button className="rounded-full" disabled={!hasGas}><UserPlus className="size-4" /> Add employee</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle className="font-heading text-xl">Add employee</DialogTitle>
+          <DialogTitle className="font-heading text-xl">{editing ? `Edit ${editing.name}` : 'Add employee'}</DialogTitle>
           <DialogDescription>Name is encrypted PII; the salary is sealed on-chain and never touches the server.</DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
           <Field label="Name"><input className="field" value={name} onChange={(e) => setName(e.target.value)} placeholder="Jordan Lee" /></Field>
           <Field label="Aleo address">
-            <input className="field font-mono text-xs" value={address} onChange={(e) => setAddress(e.target.value.trim())} placeholder="aleo1…" />
-            {address && !validAddr && <span className="mt-1 block text-xs text-destructive">Not a valid aleo1… address</span>}
+            <input
+              className="field font-mono text-xs disabled:opacity-60" value={address} disabled={!!editing}
+              onChange={(e) => setAddress(e.target.value.trim())} placeholder="aleo1…"
+            />
+            {editing
+              ? <span className="mt-1 block text-xs text-muted-foreground">Locked — a different address is a different person, and their payment history would follow the old one.</span>
+              : address && !validAddr && <span className="mt-1 block text-xs text-destructive">Not a valid aleo1… address</span>}
           </Field>
           <Field label={`Monthly salary (${symbol})`}><input className="field font-mono" value={salary} onChange={(e) => setSalary(e.target.value.replace(/[^0-9]/g, ''))} placeholder="12000" inputMode="numeric" /></Field>
         </div>
         <DialogFooter>
-          <Button variant="outline" className="rounded-full" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button className="rounded-full" onClick={submit} disabled={busy}>{busy ? 'Sealing…' : 'Seal & add'}</Button>
+          <Button variant="outline" className="rounded-full" onClick={close}>Cancel</Button>
+          <Button className="rounded-full" onClick={submit} disabled={busy}>
+            {busy ? 'Sealing…' : editing ? 'Save changes' : 'Seal & add'}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   )
 }
 
-function ImportCsv({ companyId, tokenId, decimals, salaries, executeTransaction, onAdded }: {
+function ImportCsv({ companyId, tokenId, decimals, salaries, executeTransaction, transactionStatus, requestRecords, onAdded, hasGas }: {
   companyId: string; tokenId: string; decimals: number
   salaries: Record<string, SalaryCfg>
-  executeTransaction: Wallet['executeTransaction']; onAdded: () => void
+  executeTransaction: Wallet['executeTransaction']; transactionStatus: Wallet['transactionStatus']
+  requestRecords: Wallet['requestRecords']; onAdded: () => void; hasGas: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [rows, setRows] = useState<CsvRow[]>([])
@@ -794,26 +926,41 @@ function ImportCsv({ companyId, tokenId, decimals, salaries, executeTransaction,
     if (!rows.length) return
     setBusy(true); setDone(0)
     let ok = 0
+    let lastTempId: string | undefined
+    let revived = 0 // 曾被擦除又被这次导入复活的行——批量下逐条 toast 会刷屏，汇总提示
+    // ponytail: 只等最后一笔落链（顺序提交，它 accepted 时前面的基本都已落链）。要逐笔确认
+    // 就得为每笔各起一个 3min 轮询，导 40 人时不值当。
     try {
       const existing = rows.filter((r) => salaries[r.address])
       const fresh = rows.filter((r) => !salaries[r.address])
       for (const row of existing) {
-        await addEmployee(companyId, { name: row.name, walletAddress: row.address }) // 幂等，刷新姓名
-        await executeTransaction(updateSalaryOpts(salaries[row.address].uid, toBase(row.salary, decimals)))
+        const r = await addEmployee(companyId, { name: row.name, walletAddress: row.address }) // 幂等，刷新姓名
+        if (r.status === 'revived') revived += 1
+        const res = await executeTransaction(updateSalaryOpts(salaries[row.address].uid, toBase(row.salary, decimals)))
+        lastTempId = res?.transactionId ?? lastTempId
         ok += 1; setDone(ok)
       }
       for (let i = 0; i < fresh.length; i += SALARY_BATCH) {
         const chunk = fresh.slice(i, i + SALARY_BATCH)
-        for (const row of chunk) await addEmployee(companyId, { name: row.name, walletAddress: row.address })
+        for (const row of chunk) {
+          const r = await addEmployee(companyId, { name: row.name, walletAddress: row.address })
+          if (r.status === 'revived') revived += 1
+        }
         // 补位到 8：多余槽用本组第一个地址 + amount 0（读取端按 amount>0 过滤掉）。
         const pad = chunk[0].address
         const employees = Array.from({ length: SALARY_BATCH }, (_, j) => chunk[j]?.address ?? pad)
         const amounts = Array.from({ length: SALARY_BATCH }, (_, j) => (chunk[j] ? toBase(chunk[j].salary, decimals) : 0n))
-        await executeTransaction(setSalaryBatchOpts(employees, amounts, tokenId))
+        const res = await executeTransaction(setSalaryBatchOpts(employees, amounts, tokenId))
+        lastTempId = res?.transactionId ?? lastTempId
         ok += chunk.length; setDone(ok)
       }
-      toast.success(`Imported ${ok}/${rows.length} · salaries sealed on-chain`)
+      toast.success(`Imported ${ok}/${rows.length} · salaries sealed on-chain`, {
+        description: revived > 0
+          ? `${revived} previously erased address${revived > 1 ? 'es were' : ' was'} restored — their past payment records are linked again.`
+          : undefined,
+      })
       reset(); setOpen(false); onAdded()
+      if (lastTempId) void sealSalary({ transactionStatus, requestRecords }, lastTempId, null, onAdded)
     } catch (e) {
       toast.error('Import failed', { description: String((e as Error)?.message ?? e) })
     } finally {
@@ -824,7 +971,7 @@ function ImportCsv({ companyId, tokenId, decimals, salaries, executeTransaction,
   return (
     <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset() }}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="rounded-full"><Upload className="size-4" /> Import CSV</Button>
+        <Button variant="outline" className="rounded-full" disabled={!hasGas}><Upload className="size-4" /> Import CSV</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -835,6 +982,11 @@ function ImportCsv({ companyId, tokenId, decimals, salaries, executeTransaction,
           </DialogDescription>
         </DialogHeader>
         <input type="file" accept=".csv,text/csv" onChange={onFile} disabled={busy} className="field" />
+        <Button variant="ghost" size="sm" asChild className="w-fit rounded-full text-muted-foreground">
+          <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(TEMPLATE_CSV)}`} download="sealary-employees-template.csv">
+            <Download className="size-4" /> Download template
+          </a>
+        </Button>
         {(rows.length > 0 || errors.length > 0) && (
           <div className="rounded-lg border border-border bg-secondary/40 p-3 text-sm">
             <Row k="Valid rows" v={String(rows.length)} />

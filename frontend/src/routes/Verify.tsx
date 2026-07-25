@@ -17,6 +17,8 @@ type Result = {
   period: number
   threshold: number // 人类值（已按 decimals 还原）
   symbol: string
+  verifier: string // 这份证明出给谁——验证方必须核对是自己
+  nonce: string    // 当次请求的随机数——核对是自己刚发的那个
 }
 
 const strip = (v: unknown) => String(v ?? '').replace(/u\d+$/, '').replace(/field$/, '')
@@ -29,16 +31,18 @@ async function fetchProveResult(txId: string): Promise<Omit<Result, 'threshold' 
   const transitions = tx?.execution?.transitions ?? []
   const t = transitions.find((x: { program?: string; function?: string }) => x.program === PROGRAM && x.function === 'prove_income')
   if (!t) return null
-  // 公开输出顺序：tier(u8), employer(address), token_id(field), period(u32)
+  // 公开输出顺序：tier(u8), employer(address), token_id(field), period(u32), verifier(address), nonce(field)
   const pub = (t.outputs ?? []).filter((o: { type?: string }) => o.type === 'public').map((o: { value?: string }) => o.value)
-  // 公开输入里含 threshold(u128)
+  // 公开输入：threshold(u128) 在前，verifier/nonce 也在其中——threshold 取第一个即可
   const thresholdBase = ((t.inputs ?? []).find((i: { type?: string; value?: string }) => i.type === 'public')?.value) ?? '0u128'
-  if (pub.length < 4) return null
+  if (pub.length < 6) return null
   return {
     tier: Number(strip(pub[0])) as Tier,
     employer: String(pub[1]),
     tokenId: String(pub[2]),
     period: Number(strip(pub[3])),
+    verifier: String(pub[4]),
+    nonce: String(pub[5]),
     thresholdBase: String(thresholdBase),
   }
 }
@@ -67,6 +71,8 @@ export function Verify() {
         period: r.period,
         threshold: fromBase(strip(r.thresholdBase), decimals),
         symbol: info?.symbol || info?.name || 'token',
+        verifier: r.verifier,
+        nonce: r.nonce,
       })
       toast.success('Attestation verified · amount never disclosed')
     } catch (e) {
@@ -130,6 +136,8 @@ export function Verify() {
                 <Kv k="Issued by" v={shortAddr(result.employer)} />
                 <Kv k="Token" v={`${result.symbol} · ${shortAddr(result.tokenId, 4, 4)}`} />
                 <Kv k="Period" v={period(result.period)} />
+                <Kv k="Issued to" v={shortAddr(result.verifier)} />
+                <Kv k="Nonce" v={shortAddr(strip(result.nonce), 8, 6)} />
                 <div className="flex items-center justify-between">
                   <span className="text-muted-foreground">Transaction</span>
                   <span className="text-xs"><TxLink txId={txId.trim()} /></span>
@@ -137,6 +145,10 @@ export function Verify() {
               </div>
               <p className="mt-3 flex items-center gap-1.5 text-xs text-proven">
                 <ShieldCheck className="size-3.5" /> Verified against a real employer-signed payslip. No amount crossed the wire.
+              </p>
+              <p className="mt-2 text-xs text-muted-foreground">
+                Check <strong>Issued to</strong> is your address and <strong>Nonce</strong> is the one you handed out —
+                that is what makes this proof yours and not a forwarded one.
               </p>
             </div>
           )}

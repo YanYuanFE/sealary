@@ -7,6 +7,7 @@ import { CreateOrg } from '@/routes/CreateOrg'
 import { Employer } from '@/routes/Employer'
 import { Employee } from '@/routes/Employee'
 import { Verify } from '@/routes/Verify'
+import { Docs } from '@/routes/Docs'
 
 export default function App() {
   return (
@@ -19,6 +20,7 @@ export default function App() {
             <Route path="/employer" element={<Employer />} />
             <Route path="/employee" element={<Employee />} />
             <Route path="/verify" element={<Verify />} />
+            <Route path="/docs" element={<Docs />} />
           </Routes>
         </AppShell>
         <Toaster position="bottom-right" toastOptions={{ classNames: { toast: 'font-sans' } }} />
