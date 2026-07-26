@@ -22,9 +22,9 @@ Salaries themselves are configured as **employer-owned encrypted records** (`sea
 
 `pay_batch` paying 4 employees in a single transaction has been executed end-to-end on testnet (fee ≈ 0.024 credits).
 
-## Why Aleo (vs FHE payroll)
+## Why Aleo
 
-FHE payroll projects (Paychain / DripPay / PayProof on Zama) keep amounts encrypted on-chain but leave **employee addresses fully public**, and income proofs require oracle contracts + relayers. On Aleo:
+Sealary uses Aleo's private record model to keep payroll data confidential while still producing verifiable income claims:
 
 - An income proof is **one transition**: private record in, public tier out. No oracle, no relayer.
 - The record model hides the **recipient**, not just the amount.
