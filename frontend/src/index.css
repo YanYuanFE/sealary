@@ -127,8 +127,9 @@
 }
 
 @layer components {
+    /* 与 Button 的 default 尺寸（h-10）对齐，否则表单里输入框比旁边的按钮矮一截 */
     .field {
-        @apply w-full rounded-md border border-input bg-card px-3 py-2 text-sm text-foreground
+        @apply h-10 w-full rounded-md border border-input bg-card px-3.5 py-2 text-sm text-foreground
                shadow-xs transition-colors placeholder:text-muted-foreground/70
                focus:border-seal/50 focus:ring-2 focus:ring-seal/15 focus:outline-none;
     }

@@ -15,7 +15,7 @@ export function ConnectButton() {
   if (connected && address) {
     return (
       <DropdownMenu>
-        <DropdownMenuTrigger className="group flex items-center gap-2 rounded-full border border-border bg-card px-3 py-1.5 transition-colors hover:border-seal/40">
+        <DropdownMenuTrigger className="group flex items-center gap-2 rounded-xl border border-border bg-card px-3 py-1.5 transition-colors hover:border-seal/40">
           <span className="grid size-5 place-items-center rounded-full bg-proven-soft text-proven">
             <Wallet className="size-3" strokeWidth={2.5} />
           </span>
@@ -42,7 +42,7 @@ export function ConnectButton() {
   }
 
   return (
-    <Button size="sm" className="rounded-full" disabled={connecting} onClick={() => setVisible(true)}>
+    <Button size="sm" disabled={connecting} onClick={() => setVisible(true)}>
       <Wallet className="size-4" />
       {connecting ? 'Connecting…' : 'Connect wallet'}
     </Button>

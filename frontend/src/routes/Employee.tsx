@@ -180,7 +180,7 @@ function Locked({ loading, onUnlock }: { loading: boolean; onUnlock: () => void 
       <p className="mt-2 max-w-xs text-sm text-muted-foreground">
         Sign with your Aleo view key to decrypt the Paystub records only you can read.
       </p>
-      <Button size="lg" className="mt-6 rounded-full" onClick={onUnlock} disabled={loading}>
+      <Button size="lg" className="mt-6" onClick={onUnlock} disabled={loading}>
         {loading ? <Loader2 className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
         {loading ? 'Decrypting…' : 'Decrypt with view key'}
       </Button>
@@ -316,7 +316,7 @@ function ProvePanel({ latest, decimals, symbol, wallet, onLogged, hasGas }: {
         <TierBadge tier={tier} />
       </div>
 
-      <Button className="mt-4 rounded-full" onClick={generate} disabled={busy || !latest || !hasGas || !validVerifier}>
+      <Button className="mt-4" onClick={generate} disabled={busy || !latest || !hasGas || !validVerifier}>
         {busy ? <Loader2 className="size-4 animate-spin" /> : <ShieldCheck className="size-4" />}
         {busy ? 'Confirming on-chain…' : 'Generate proof'}
       </Button>
@@ -364,7 +364,7 @@ function Payslips({ stubs, decimals, symbol, wallet, employeeName, employerName,
           <p className="text-sm text-muted-foreground">Decrypted for your eyes. Choose what to share, per record.</p>
         </div>
         {stubs.length > 0 && (
-          <Button variant="outline" size="sm" className="rounded-full" onClick={exportCsv}>
+          <Button variant="outline" size="sm" onClick={exportCsv}>
             <Download className="size-4" /> Export
           </Button>
         )}
@@ -389,7 +389,7 @@ function Payslips({ stubs, decimals, symbol, wallet, employeeName, employerName,
                 <td className="px-5 py-3.5 text-right"><SealedAmount amount={fromBase(s.amount, decimals)} revealed size="sm" /></td>
                 <td className="px-5 py-3.5">
                   <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="sm" className="rounded-full" onClick={() => printStub(s)} title="Print payslip (save as PDF)">
+                    <Button variant="ghost" size="sm" onClick={() => printStub(s)} title="Print payslip (save as PDF)">
                       <Printer className="size-4" />
                     </Button>
                     <DiscloseDialog stub={s} decimals={decimals} symbol={symbol} wallet={wallet} onLogged={onLogged} hasGas={hasGas} />
@@ -434,7 +434,7 @@ function DiscloseDialog({ stub, decimals, symbol, wallet, onLogged, hasGas }: {
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" disabled={!hasGas} className="rounded-full text-seal hover:bg-seal-soft/40 hover:text-seal">
+        <Button variant="ghost" size="sm" disabled={!hasGas} className="text-seal hover:bg-seal-soft/40 hover:text-seal">
           <ScanEye className="size-4" /> Disclose
         </Button>
       </DialogTrigger>
@@ -455,8 +455,8 @@ function DiscloseDialog({ stub, decimals, symbol, wallet, onLogged, hasGas }: {
           <input className="field" value={party} onChange={(e) => setParty(e.target.value)} placeholder="Meridian Bank" />
         </label>
         <DialogFooter>
-          <Button variant="outline" className="rounded-full" onClick={() => setOpen(false)}>Cancel</Button>
-          <Button className="rounded-full" onClick={breakSeal} disabled={busy}>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button onClick={breakSeal} disabled={busy}>
             <ScanEye className="size-4" /> {busy ? 'Breaking…' : 'Break seal'}
           </Button>
         </DialogFooter>

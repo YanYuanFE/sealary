@@ -59,7 +59,7 @@ export function CreateOrg() {
         <Card className="space-y-3 p-6">
           <p className="text-sm text-muted-foreground">This wallet already owns an organization:</p>
           <div className="font-heading text-lg font-semibold">{existing.name}</div>
-          <Button className="rounded-full" onClick={() => navigate('/employer')}>
+          <Button onClick={() => navigate('/employer')}>
             Go to console <ArrowRight className="size-4" />
           </Button>
         </Card>
@@ -79,7 +79,7 @@ export function CreateOrg() {
             <input className="field font-mono text-xs" value={tokenId} onChange={(e) => setTokenId(e.target.value.trim())} placeholder="7777field" />
           </Field>
           <TokenCard tokenId={tokenId} onResolved={setToken} />
-          <Button className="w-full rounded-full" disabled={!ready} onClick={submit}>
+          <Button className="w-full" disabled={!ready} onClick={submit}>
             Create organization <ArrowRight className="size-4" />
           </Button>
         </Card>

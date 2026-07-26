@@ -202,7 +202,7 @@ export function Employer() {
   if (!company) {
     return (
       <Gate icon={<Building2 className="size-8 text-seal" />} text="No organization on this wallet yet.">
-        <Button asChild className="rounded-full"><Link to="/setup">Create organization</Link></Button>
+        <Button asChild><Link to="/setup">Create organization</Link></Button>
       </Gate>
     )
   }
@@ -444,7 +444,7 @@ function Console({ company, address, executeTransaction, requestRecords, transac
         desc={`Pay ${company.name} in ${company.symbol}. Salaries live encrypted on-chain — the server never sees them. Each pay is a private transfer + a sealed Paystub.`}
         actions={
           <>
-            <Button variant="outline" className="rounded-full" onClick={exportCsv}>
+            <Button variant="outline" onClick={exportCsv}>
               <Download className="size-4" /> Export
             </Button>
             <ImportCsv
@@ -487,7 +487,7 @@ function Console({ company, address, executeTransaction, requestRecords, transac
             <p className="text-sm text-muted-foreground">Salaries are encrypted on-chain (only you can decrypt) — never stored on the server.</p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" className="rounded-full" onClick={() => setReveal((v) => !v)}>
+            <Button variant="ghost" size="sm" onClick={() => setReveal((v) => !v)}>
               {reveal ? <EyeOff className="size-4" /> : <Eye className="size-4" />}
               {reveal ? 'Seal' : 'Reveal'}
             </Button>
@@ -543,13 +543,13 @@ function Console({ company, address, executeTransaction, requestRecords, transac
                     </td>
                     <td className="px-2 py-3.5 text-right">
                       <div className="flex justify-end">
-                        <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-seal" onClick={() => setEditing(e)} aria-label={`Edit ${e.name}`} title="Edit name / salary">
+                        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-seal" onClick={() => setEditing(e)} aria-label={`Edit ${e.name}`} title="Edit name / salary">
                           <Pencil className="size-4" />
                         </Button>
-                        <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-seal" onClick={() => setBonusFor(e)} disabled={!isAleoAddr(e.walletAddress) || !hasGas} aria-label={`One-off payment to ${e.name}`} title="One-off payment (bonus)">
+                        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-seal" onClick={() => setBonusFor(e)} disabled={!isAleoAddr(e.walletAddress) || !hasGas} aria-label={`One-off payment to ${e.name}`} title="One-off payment (bonus)">
                           <Gift className="size-4" />
                         </Button>
-                        <Button variant="ghost" size="sm" className="rounded-full text-muted-foreground hover:text-destructive" onClick={() => setRemoving(e)} aria-label={`Remove ${e.name}`}>
+                        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-destructive" onClick={() => setRemoving(e)} aria-label={`Remove ${e.name}`}>
                           <Trash2 className="size-4" />
                         </Button>
                       </div>
@@ -576,8 +576,8 @@ function Console({ company, address, executeTransaction, requestRecords, transac
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
-            <Button variant="outline" className="rounded-full" onClick={() => setRemoving(null)}>Cancel</Button>
-            <Button variant="destructive" className="rounded-full" onClick={forget} disabled={shredding}>
+            <Button variant="outline" onClick={() => setRemoving(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={forget} disabled={shredding}>
               <Trash2 className="size-4" /> {shredding ? 'Shredding…' : 'Remove & shred'}
             </Button>
           </DialogFooter>
@@ -682,7 +682,7 @@ function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol, 
           <h2 className="font-heading text-lg font-semibold">Payment history</h2>
           <p className="text-sm text-muted-foreground">Who &amp; when — amounts stay sealed on-chain, the server stores none.</p>
         </div>
-        <Button variant="outline" size="sm" className="rounded-full" onClick={exportReport} title="Aggregated per-period report — no identities">
+        <Button variant="outline" size="sm" onClick={exportReport} title="Aggregated per-period report — no identities">
           <FileText className="size-4" /> Report
         </Button>
       </div>
@@ -722,7 +722,7 @@ function PaymentHistory({ payments, roster, salaries, decimals, reveal, symbol, 
                   {new Date(first.createdAt).toLocaleDateString('en-US')}
                 </td>
                 <td className="px-5 py-3.5 text-right">
-                  <Button variant="ghost" size="sm" className="rounded-full" onClick={() => printReceipt(ps)} title="Print receipt (save as PDF)">
+                  <Button variant="ghost" size="sm" onClick={() => printReceipt(ps)} title="Print receipt (save as PDF)">
                     <Printer className="size-4" />
                   </Button>
                 </td>
@@ -748,7 +748,7 @@ function RunBatchDialog(
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
-        <Button className="rounded-full" disabled={batchN === 0 || busy || !hasGas}>
+        <Button disabled={batchN === 0 || busy || !hasGas}>
           <Send className="size-4" /> {busy ? 'Confirming…' : `Pay batch${batchN > 0 ? ` (${batchN})` : ''}`}
         </Button>
       </DialogTrigger>
@@ -772,9 +772,9 @@ function RunBatchDialog(
           </p>
         )}
         <DialogFooter>
-          <Button variant="outline" className="rounded-full" onClick={() => setOpen(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
           {/* 立即关弹窗，链上确认进度走 toast（waitForTx 可达数分钟，不困在模态里） */}
-          <Button className="rounded-full" disabled={busy || insufficient} onClick={() => { void onConfirm(); setOpen(false) }}>
+          <Button disabled={busy || insufficient} onClick={() => { void onConfirm(); setOpen(false) }}>
             <Send className="size-4" /> {busy ? 'Sealing…' : 'Confirm & seal'}
           </Button>
         </DialogFooter>
@@ -865,7 +865,7 @@ function AddEmployee({ companyId, tokenId, symbol, decimals, salaries, executeTr
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) close(); else setSelfOpen(true) }}>
       <DialogTrigger asChild>
-        <Button className="rounded-full" disabled={!hasGas}><UserPlus className="size-4" /> Add employee</Button>
+        <Button disabled={!hasGas}><UserPlus className="size-4" /> Add employee</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -886,8 +886,8 @@ function AddEmployee({ companyId, tokenId, symbol, decimals, salaries, executeTr
           <Field label={`Monthly salary (${symbol})`}><input className="field font-mono" value={salary} onChange={(e) => setSalary(e.target.value.replace(/[^0-9]/g, ''))} placeholder="12000" inputMode="numeric" /></Field>
         </div>
         <DialogFooter>
-          <Button variant="outline" className="rounded-full" onClick={close}>Cancel</Button>
-          <Button className="rounded-full" onClick={submit} disabled={busy}>
+          <Button variant="outline" onClick={close}>Cancel</Button>
+          <Button onClick={submit} disabled={busy}>
             {busy ? 'Sealing…' : editing ? 'Save changes' : 'Seal & add'}
           </Button>
         </DialogFooter>
@@ -971,7 +971,7 @@ function ImportCsv({ companyId, tokenId, decimals, salaries, executeTransaction,
   return (
     <Dialog open={open} onOpenChange={(v) => { setOpen(v); if (!v) reset() }}>
       <DialogTrigger asChild>
-        <Button variant="outline" className="rounded-full" disabled={!hasGas}><Upload className="size-4" /> Import CSV</Button>
+        <Button variant="outline" disabled={!hasGas}><Upload className="size-4" /> Import CSV</Button>
       </DialogTrigger>
       <DialogContent>
         <DialogHeader>
@@ -982,7 +982,7 @@ function ImportCsv({ companyId, tokenId, decimals, salaries, executeTransaction,
           </DialogDescription>
         </DialogHeader>
         <input type="file" accept=".csv,text/csv" onChange={onFile} disabled={busy} className="field" />
-        <Button variant="ghost" size="sm" asChild className="w-fit rounded-full text-muted-foreground">
+        <Button variant="ghost" size="sm" asChild className="w-fit text-muted-foreground">
           <a href={`data:text/csv;charset=utf-8,${encodeURIComponent(TEMPLATE_CSV)}`} download="sealary-employees-template.csv">
             <Download className="size-4" /> Download template
           </a>
@@ -995,8 +995,8 @@ function ImportCsv({ companyId, tokenId, decimals, salaries, executeTransaction,
           </div>
         )}
         <DialogFooter>
-          <Button variant="outline" className="rounded-full" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
-          <Button className="rounded-full" onClick={runImport} disabled={busy || rows.length === 0}>
+          <Button variant="outline" onClick={() => setOpen(false)} disabled={busy}>Cancel</Button>
+          <Button onClick={runImport} disabled={busy || rows.length === 0}>
             <Upload className="size-4" /> {busy ? `Sealing ${done}/${rows.length}…` : `Import ${rows.length || ''}`.trim()}
           </Button>
         </DialogFooter>
@@ -1027,8 +1027,8 @@ function BonusDialog({ person, symbol, busy, onClose, onConfirm }: {
           <input className="field font-mono" value={amount} onChange={(e) => setAmount(e.target.value.replace(/[^0-9]/g, ''))} placeholder="1000" inputMode="numeric" />
         </Field>
         <DialogFooter>
-          <Button variant="outline" className="rounded-full" onClick={onClose}>Cancel</Button>
-          <Button className="rounded-full" disabled={busy || !(n > 0)} onClick={() => onConfirm(n)}>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button disabled={busy || !(n > 0)} onClick={() => onConfirm(n)}>
             <Gift className="size-4" /> Seal &amp; pay
           </Button>
         </DialogFooter>

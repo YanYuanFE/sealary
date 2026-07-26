@@ -27,10 +27,10 @@ export function GasBanner() {
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2 sm:ml-3">
-        <Button variant="outline" size="sm" className="rounded-full" onClick={() => void refetch()} disabled={checking}>
+        <Button variant="outline" size="sm" onClick={() => void refetch()} disabled={checking}>
           <RotateCw className={checking ? 'size-4 animate-spin' : 'size-4'} /> {checking ? 'Checking…' : 'Check again'}
         </Button>
-        <Button size="sm" asChild className="rounded-full">
+        <Button size="sm" asChild>
           <a href={FAUCET} target="_blank" rel="noreferrer">
             Get testnet credits <ExternalLink className="size-4" />
           </a>

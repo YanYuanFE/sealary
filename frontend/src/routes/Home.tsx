@@ -1,6 +1,24 @@
 import { useState } from 'react'
 import { Link } from 'react-router-dom'
-import { ArrowRight, BadgeCheck, Building2, CheckCircle2, Database, EyeOff, Globe2, Minus, ScanEye, ShieldCheck, Stamp, User } from 'lucide-react'
+import {
+  ArrowRight,
+  BadgeCheck,
+  Building2,
+  CheckCircle2,
+  Database,
+  ExternalLink,
+  EyeOff,
+  Fingerprint,
+  Globe2,
+  LockKeyhole,
+  Minus,
+  ScanEye,
+  Server,
+  ShieldCheck,
+  Stamp,
+  User,
+  WalletCards,
+} from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { SealMark } from '@/components/brand/SealMark'
@@ -22,111 +40,321 @@ export function Home() {
 
   return (
     <div className="space-y-24">
-      <section className="landing-paper relative left-1/2 -mt-10 w-screen -translate-x-1/2 overflow-hidden border-b border-border/70 px-5 py-16 sm:py-20 lg:min-h-[calc(100dvh-4rem)] lg:py-24">
-        <HeroShader />
-        <div className="relative mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[minmax(520px,0.95fr)_1.05fr]">
-          <div>
-            <div className="reveal" style={{ animationDelay: '0ms' }}>
-              <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-card/70 px-3 py-1 font-mono text-xs text-muted-foreground shadow-sm backdrop-blur-md">
-                Aleo zero-knowledge payroll
-              </span>
-            </div>
-            <h1 className="reveal mt-6 max-w-3xl font-heading text-5xl leading-[1.02] font-semibold tracking-tight text-foreground sm:text-6xl xl:text-7xl" style={{ animationDelay: '80ms' }}>
-              Private payroll.
-              <br />
-              <span className="text-seal">Provable income.</span>
-            </h1>
-            <p className="reveal mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground" style={{ animationDelay: '160ms' }}>
-              Pay privately on Aleo. Prove income tiers without revealing salary amounts.
-            </p>
-            <div className="reveal mt-8 flex flex-wrap items-center gap-3" style={{ animationDelay: '240ms' }}>
-              <Button asChild size="lg" className="rounded-md bg-primary px-5">
-                <Link to="/employer">
-                  Open console <ArrowRight className="size-4" />
-                </Link>
-              </Button>
-              <Button asChild variant="outline" size="lg" className="rounded-md bg-card/60 backdrop-blur">
-                <Link to="/employee">View employee flow</Link>
-              </Button>
-            </div>
-          </div>
-
-          <div className="reveal" style={{ animationDelay: '180ms' }}>
-            <HeroTilt className="relative min-h-[520px]">
-            <div className="glass-proof absolute right-0 top-4 hidden w-[78%] rotate-3 rounded-2xl border border-white/60 p-5 backdrop-blur-md md:block">
-              <div className="flex items-start justify-between gap-8">
-                <div>
-                  <p className="font-mono text-xs tracking-widest text-muted-foreground uppercase">ZK proof</p>
-                  <p className="mt-3 font-mono text-sm text-foreground">proof_8e7d9c2b1a6f</p>
-                  <p className="mt-1 font-mono text-xs text-muted-foreground">network: aleo testnet</p>
-                </div>
-                <TierBadge tier={tier} />
-              </div>
-            </div>
-
-            <Card className="absolute left-0 top-20 w-[82%] rotate-[-4deg] gap-0 overflow-hidden border-border/80 bg-card/90 p-0 shadow-[0_24px_70px_-42px_oklch(0.235_0.014_62/0.55)] backdrop-blur">
-              <div className="flex items-center justify-between border-b border-border/70 px-6 py-4">
-                <div className="flex items-center gap-2.5">
-                  <SealMark size={30} />
-                  <div className="leading-tight">
-                    <p className="font-heading text-lg font-semibold">Payslip</p>
-                    <p className="font-mono text-xs text-muted-foreground">2026-07</p>
-                  </div>
-                </div>
-                <span className="rounded-full bg-seal-soft px-3 py-1 font-mono text-[0.68rem] tracking-widest text-seal uppercase">
-                  sealed
+      <div>
+        <section className="landing-paper relative left-1/2 -mt-10 w-screen -translate-x-1/2 overflow-hidden border-b border-border/70 px-5 py-16 sm:py-20 lg:min-h-[calc(100dvh-4rem)] lg:py-24">
+          <HeroShader />
+          <div className="relative mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[minmax(520px,0.95fr)_1.05fr]">
+            <div>
+              <div className="reveal" style={{ animationDelay: '0ms' }}>
+                <span className="inline-flex items-center gap-2 rounded-full border border-border/80 bg-card/70 px-3 py-1 font-mono text-xs text-muted-foreground shadow-sm backdrop-blur-md">
+                  Aleo zero-knowledge payroll
                 </span>
               </div>
-              <div className="px-6 py-7">
-                <p className="font-mono text-xs tracking-wide text-muted-foreground uppercase">Monthly salary</p>
-                <div className="mt-3 flex min-h-14 items-center">
-                  <SealedAmount amount={DEMO_AMOUNT} revealed={revealed} size="lg" />
-                </div>
-                <div className="mt-6 grid gap-3 font-mono text-xs text-muted-foreground sm:grid-cols-2">
-                  <span>owner {shortAddr('aleo1z62rhxmej9ldd9hf76xa6r5p2dm4fgvsxv90p728mrgzm4ywz5fqezlww8')}</span>
-                  <span>program sealary_payroll_v2.aleo</span>
-                  <span>token zUSD</span>
-                  <span>record encrypted</span>
-                </div>
+              <h1 className="reveal mt-6 max-w-3xl font-heading text-5xl leading-[1.02] font-semibold tracking-tight text-foreground sm:text-6xl xl:text-7xl" style={{ animationDelay: '80ms' }}>
+                Private payroll.
+                <br />
+                <span className="text-seal">Provable income.</span>
+              </h1>
+              <p className="reveal mt-6 max-w-xl text-lg leading-relaxed text-muted-foreground" style={{ animationDelay: '160ms' }}>
+                Pay privately on Aleo. Prove income tiers without revealing salary amounts.
+              </p>
+              <div className="reveal mt-8 flex flex-wrap items-center gap-3" style={{ animationDelay: '240ms' }}>
+                <Button asChild size="lg" className="rounded-md bg-primary px-5">
+                  <Link to="/employer">
+                    Open console <ArrowRight className="size-4" />
+                  </Link>
+                </Button>
+                <Button asChild variant="outline" size="lg" className="rounded-md bg-card/60 backdrop-blur">
+                  <Link to="/employee">View employee flow</Link>
+                </Button>
               </div>
-              <div className="grid grid-cols-3 gap-px border-t border-border/70 bg-border/70">
-                <DemoTab active={state === 'sealed'} onClick={() => setState('sealed')} icon={<Stamp className="size-4" />} label="Sealed" />
-                <DemoTab active={state === 'proven'} onClick={() => setState('proven')} icon={<ShieldCheck className="size-4" />} label="Prove ≥ $8k" />
-                <DemoTab active={state === 'disclosed'} onClick={() => setState('disclosed')} icon={<ScanEye className="size-4" />} label="Disclose" />
-              </div>
-            </Card>
+            </div>
 
-            <Card className="absolute bottom-3 right-4 w-[58%] gap-0 border-proven/20 bg-card/85 p-5 shadow-[0_20px_48px_-36px_oklch(0.235_0.014_62/0.45)] backdrop-blur">
-              {state === 'proven' && (
-                <div className="reveal-blur">
+            <div className="reveal" style={{ animationDelay: '180ms' }}>
+              <HeroTilt className="relative min-h-[520px]">
+              <div className="glass-proof absolute right-0 top-4 hidden w-[78%] rotate-3 rounded-2xl border border-white/60 p-5 backdrop-blur-md md:block">
+                <div className="flex items-start justify-between gap-8">
+                  <div>
+                    <p className="font-mono text-xs tracking-widest text-muted-foreground uppercase">ZK proof</p>
+                    <p className="mt-3 font-mono text-sm text-foreground">proof_8e7d9c2b1a6f</p>
+                    <p className="mt-1 font-mono text-xs text-muted-foreground">network: aleo testnet</p>
+                  </div>
                   <TierBadge tier={tier} />
-                  <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-                    Verifier learns the tier for a ${DEMO_THRESHOLD.toLocaleString()} threshold. The amount stays hidden.
-                  </p>
                 </div>
-              )}
-              {state === 'disclosed' && (
-                <p className="reveal-blur text-sm leading-relaxed text-muted-foreground">
-                  The owner breaks the seal for one payslip and one receiving party.
-                </p>
-              )}
-              {state === 'sealed' && (
-                <p className="text-sm leading-relaxed text-muted-foreground">
-                  Encrypted on-chain. Colleagues, the public, and validators see no salary amount.
-                </p>
-              )}
-            </Card>
-            </HeroTilt>
+              </div>
+
+              <Card className="absolute left-0 top-20 w-[82%] rotate-[-4deg] gap-0 overflow-hidden border-border/80 bg-card/90 p-0 shadow-[0_24px_70px_-42px_oklch(0.235_0.014_62/0.55)] backdrop-blur">
+                <div className="flex items-center justify-between border-b border-border/70 px-6 py-4">
+                  <div className="flex items-center gap-2.5">
+                    <SealMark size={30} />
+                    <div className="leading-tight">
+                      <p className="font-heading text-lg font-semibold">Payslip</p>
+                      <p className="font-mono text-xs text-muted-foreground">2026-07</p>
+                    </div>
+                  </div>
+                  <span className="rounded-full bg-seal-soft px-3 py-1 font-mono text-[0.68rem] tracking-widest text-seal uppercase">
+                    sealed
+                  </span>
+                </div>
+                <div className="px-6 py-7">
+                  <p className="font-mono text-xs tracking-wide text-muted-foreground uppercase">Monthly salary</p>
+                  <div className="mt-3 flex min-h-14 items-center">
+                    <SealedAmount amount={DEMO_AMOUNT} revealed={revealed} size="lg" />
+                  </div>
+                  <div className="mt-6 grid gap-3 font-mono text-xs text-muted-foreground sm:grid-cols-2">
+                    <span>owner {shortAddr('aleo1z62rhxmej9ldd9hf76xa6r5p2dm4fgvsxv90p728mrgzm4ywz5fqezlww8')}</span>
+                    <span>program sealary_payroll_v2.aleo</span>
+                    <span>token zUSD</span>
+                    <span>record encrypted</span>
+                  </div>
+                </div>
+                <div className="grid grid-cols-3 gap-px border-t border-border/70 bg-border/70">
+                  <DemoTab active={state === 'sealed'} onClick={() => setState('sealed')} icon={<Stamp className="size-4" />} label="Sealed" />
+                  <DemoTab active={state === 'proven'} onClick={() => setState('proven')} icon={<ShieldCheck className="size-4" />} label="Prove ≥ $8k" />
+                  <DemoTab active={state === 'disclosed'} onClick={() => setState('disclosed')} icon={<ScanEye className="size-4" />} label="Disclose" />
+                </div>
+              </Card>
+
+              <Card className="absolute bottom-3 right-4 w-[58%] gap-0 border-proven/20 bg-card/85 p-5 shadow-[0_20px_48px_-36px_oklch(0.235_0.014_62/0.45)] backdrop-blur">
+                {state === 'proven' && (
+                  <div className="reveal-blur">
+                    <TierBadge tier={tier} />
+                    <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
+                      Verifier learns the tier for a ${DEMO_THRESHOLD.toLocaleString()} threshold. The amount stays hidden.
+                    </p>
+                  </div>
+                )}
+                {state === 'disclosed' && (
+                  <p className="reveal-blur text-sm leading-relaxed text-muted-foreground">
+                    The owner breaks the seal for one payslip and one receiving party.
+                  </p>
+                )}
+                {state === 'sealed' && (
+                  <p className="text-sm leading-relaxed text-muted-foreground">
+                    Encrypted on-chain. Colleagues, the public, and validators see no salary amount.
+                  </p>
+                )}
+              </Card>
+              </HeroTilt>
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
+        <TestnetTrustBar />
+      </div>
 
       <PrivacyMatrix />
 
       <FlowStory />
 
+      <TrustArchitecture />
+
       <RoleEntry />
+
+      <FinalCta />
     </div>
+  )
+}
+
+function TestnetTrustBar() {
+  const items = [
+    {
+      icon: <Globe2 className="size-4" />,
+      label: 'Network',
+      value: 'Aleo testnet',
+      href: 'https://testnet.explorer.provable.com/program/sealary_payroll_v2.aleo',
+    },
+    {
+      icon: <WalletCards className="size-4" />,
+      label: 'Private batch',
+      value: '4 transfers per tx',
+    },
+    {
+      icon: <Fingerprint className="size-4" />,
+      label: 'Proof binding',
+      value: 'Verifier + nonce',
+    },
+    {
+      icon: <EyeOff className="size-4" />,
+      label: 'Public salary state',
+      value: 'None',
+    },
+  ]
+
+  return (
+    <section aria-label="Testnet deployment facts" className="relative left-1/2 w-screen -translate-x-1/2 border-b border-border/70 bg-card/70 px-5">
+      <div className="mx-auto grid max-w-7xl grid-cols-2 divide-x divide-y divide-border/70 border-x border-border/70 lg:grid-cols-4 lg:divide-y-0">
+        {items.map((item) => {
+          const content = (
+            <>
+              <span className="text-seal">{item.icon}</span>
+              <span>
+                <span className="block font-mono text-[0.68rem] tracking-wide text-muted-foreground uppercase">{item.label}</span>
+                <span className="mt-1 flex items-center gap-1.5 text-sm font-medium text-foreground">
+                  {item.value}
+                  {item.href && <ExternalLink className="size-3.5 text-muted-foreground" />}
+                </span>
+              </span>
+            </>
+          )
+          return item.href ? (
+            <a
+              key={item.label}
+              href={item.href}
+              target="_blank"
+              rel="noreferrer"
+              className="flex min-h-24 items-center gap-3 px-4 py-5 transition-colors hover:bg-secondary/45"
+            >
+              {content}
+            </a>
+          ) : (
+            <div key={item.label} className="flex min-h-24 items-center gap-3 px-4 py-5">
+              {content}
+            </div>
+          )
+        })}
+      </div>
+    </section>
+  )
+}
+
+function TrustArchitecture() {
+  return (
+    <section>
+      <div className="max-w-3xl">
+        <h2 className="font-heading text-4xl leading-tight font-semibold tracking-tight text-foreground sm:text-5xl">
+          Two systems. Neither sees the whole picture.
+        </h2>
+        <p className="mt-5 max-w-2xl text-base leading-relaxed text-muted-foreground sm:text-lg">
+          Identity and salary travel on separate rails. A breach on either side still cannot reconstruct a complete payroll.
+        </p>
+      </div>
+
+      <div className="mt-10 overflow-hidden rounded-lg border border-border/80 bg-card/75 shadow-[0_24px_70px_-54px_oklch(0.235_0.014_62/0.5)]">
+        <div className="flex flex-col gap-4 border-b border-border/70 bg-secondary/35 px-5 py-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <span className="grid size-11 place-items-center rounded-lg bg-primary text-primary-foreground">
+              <WalletCards className="size-5" />
+            </span>
+            <div>
+              <p className="font-heading text-xl font-semibold">The wallet is the privacy boundary</p>
+              <p className="mt-1 text-sm text-muted-foreground">It signs identity requests and private Aleo transitions separately.</p>
+            </div>
+          </div>
+          <span className="inline-flex items-center gap-2 self-start rounded-full border border-proven/20 bg-proven-soft/45 px-3 py-1.5 font-mono text-xs text-proven sm:self-auto">
+            <CheckCircle2 className="size-3.5" />
+            no shared salary database
+          </span>
+        </div>
+
+        <div className="grid md:grid-cols-2 md:divide-x md:divide-border/70">
+          <ArchitectureRail
+            icon={<Server className="size-5" />}
+            title="Encrypted identity vault"
+            subtitle="Vercel Functions + Postgres"
+            items={['Company and employee roster', 'AES-256-GCM encrypted identity', 'Audit and transaction metadata']}
+            never="Never receives salary amounts, Paystub contents, or a view key."
+          />
+          <ArchitectureRail
+            icon={<Fingerprint className="size-5" />}
+            title="Aleo private state"
+            subtitle="Programs + encrypted records"
+            items={['Private zUSD Token records', 'Employer-owned SalaryConfig', 'Employee-owned Paystub and ZK proofs']}
+            never="Never receives employee names, email addresses, or tax IDs."
+            chain
+          />
+        </div>
+
+        <div className="grid gap-4 border-t border-border/70 bg-background/60 px-5 py-5 sm:grid-cols-[auto_1fr_auto] sm:items-center">
+          <span className="grid size-11 place-items-center rounded-full bg-seal-soft text-seal">
+            <LockKeyhole className="size-5" />
+          </span>
+          <div>
+            <p className="font-heading text-lg font-semibold">Double data minimization</p>
+            <p className="mt-1 text-sm leading-relaxed text-muted-foreground">
+              The backend knows who is employed. Aleo knows what encrypted records can prove. Neither knows both.
+            </p>
+          </div>
+          <Button asChild variant="outline" className="justify-self-start bg-card sm:justify-self-end">
+            <Link to="/docs">
+              Read the protocol <ArrowRight className="size-4" />
+            </Link>
+          </Button>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function ArchitectureRail({
+  icon,
+  title,
+  subtitle,
+  items,
+  never,
+  chain,
+}: {
+  icon: React.ReactNode
+  title: string
+  subtitle: string
+  items: string[]
+  never: string
+  chain?: boolean
+}) {
+  return (
+    <div className={`p-6 sm:p-8 ${chain ? 'border-t border-border/70 bg-proven-soft/10 md:border-t-0' : ''}`}>
+      <div className="flex items-center gap-3">
+        <span className={`grid size-10 place-items-center rounded-lg ${chain ? 'bg-proven-soft text-proven' : 'bg-seal-soft text-seal'}`}>
+          {icon}
+        </span>
+        <div>
+          <h3 className="font-heading text-2xl font-semibold">{title}</h3>
+          <p className="mt-1 font-mono text-xs text-muted-foreground">{subtitle}</p>
+        </div>
+      </div>
+      <div className="mt-7 space-y-4">
+        {items.map((item) => (
+          <div key={item} className="flex items-center gap-3 text-sm text-foreground">
+            <CheckCircle2 className={`size-4 shrink-0 ${chain ? 'text-proven' : 'text-seal'}`} />
+            {item}
+          </div>
+        ))}
+      </div>
+      <div className="mt-7 border-t border-border/70 pt-5">
+        <p className="flex gap-2 text-sm leading-relaxed text-muted-foreground">
+          <EyeOff className="mt-0.5 size-4 shrink-0" />
+          {never}
+        </p>
+      </div>
+    </div>
+  )
+}
+
+function FinalCta() {
+  return (
+    <section className="landing-paper relative left-1/2 w-screen -translate-x-1/2 overflow-hidden border-y border-border/70 px-5 py-20 sm:py-24">
+      <div className="absolute inset-y-0 right-0 w-1/2 bg-[radial-gradient(circle_at_70%_50%,oklch(0.47_0.145_32/0.13),transparent_52%)]" aria-hidden />
+      <div className="relative mx-auto grid max-w-7xl items-center gap-10 lg:grid-cols-[1fr_auto]">
+        <div className="max-w-3xl">
+          <SealMark size={52} />
+          <h2 className="mt-7 font-heading text-4xl leading-tight font-semibold tracking-tight text-foreground sm:text-5xl">
+            Keep the number private. Keep the proof useful.
+          </h2>
+          <p className="mt-5 max-w-xl text-base leading-relaxed text-muted-foreground sm:text-lg">
+            Create a payroll workspace, seal the salary configuration, and run the next pay period on Aleo.
+          </p>
+        </div>
+        <div className="flex flex-col items-start gap-3 sm:flex-row lg:flex-col lg:items-stretch">
+          <Button asChild size="lg" className="min-w-48">
+            <Link to="/setup">
+              Create organization <ArrowRight className="size-4" />
+            </Link>
+          </Button>
+          <Button asChild variant="outline" size="lg" className="min-w-48 bg-card/75">
+            <Link to="/docs">Explore the protocol</Link>
+          </Button>
+        </div>
+      </div>
+    </section>
   )
 }
 
@@ -224,10 +452,10 @@ function RolePanel({
 
 function EmployerPreview() {
   const rows = [
-    ['Amina Yusuf', 'Product', 'pending'],
-    ['Liam OConnor', 'Engineering', 'pending'],
-    ['Mei Chen', 'Design', 'finalized'],
-    ['Noah Patel', 'Data', 'finalized'],
+    ['Amina Yusuf', 'pending'],
+    ['Liam OConnor', 'pending'],
+    ['Mei Chen', 'finalized'],
+    ['Noah Patel', 'finalized'],
   ]
 
   return (
@@ -239,18 +467,10 @@ function EmployerPreview() {
         </div>
         <span className="rounded-full bg-proven-soft px-3 py-1 font-mono text-xs text-proven">zUSD ready</span>
       </div>
-      <div className="mt-4 grid gap-2 sm:grid-cols-4">
-        {['Register', 'Mint', 'Employees', 'Batch pay'].map((item) => (
-          <div key={item} className="rounded-lg border border-border bg-card px-3 py-2 text-xs text-foreground">
-            {item}
-          </div>
-        ))}
-      </div>
       <div className="mt-4 overflow-hidden rounded-lg border border-border bg-card">
-        {rows.map(([name, role, status]) => (
-          <div key={name} className="grid grid-cols-[1.15fr_0.9fr_auto] items-center gap-3 border-b border-border/60 px-3 py-3 text-sm last:border-b-0">
+        {rows.map(([name, status]) => (
+          <div key={name} className="grid grid-cols-[1fr_auto] items-center gap-3 border-b border-border/60 px-3 py-3 text-sm last:border-b-0">
             <span className="truncate text-foreground">{name}</span>
-            <span className="truncate text-muted-foreground">{role}</span>
             <span className={`rounded-full px-2 py-1 font-mono text-[0.65rem] ${status === 'finalized' ? 'bg-proven-soft text-proven' : 'bg-pending-soft text-pending'}`}>
               {status}
             </span>
@@ -411,7 +631,6 @@ function FlowStep({
           </div>
           <p className="mt-5 max-w-sm text-sm leading-relaxed text-muted-foreground">{body}</p>
         </div>
-        <p className="mt-8 font-mono text-xs text-muted-foreground">// {verb.toLowerCase()} record</p>
       </div>
       <div className="min-h-[260px] p-5">{children}</div>
     </Card>

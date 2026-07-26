@@ -127,7 +127,7 @@ export function Docs() {
 
       <Card className="flex flex-col items-start gap-3 p-6 sm:flex-row sm:items-center sm:justify-between">
         <p className="text-sm text-muted-foreground">Ready to try it? Start by creating an organization.</p>
-        <Button asChild className="rounded-full">
+        <Button asChild>
           <Link to="/setup">Create organization <ArrowRight className="size-4" /></Link>
         </Button>
       </Card>

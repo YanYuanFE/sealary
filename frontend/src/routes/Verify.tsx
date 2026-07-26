@@ -100,7 +100,7 @@ export function Verify() {
             <span className="mb-1.5 block text-sm font-medium">prove_income transaction id</span>
             <input className="field font-mono text-xs" value={txId} onChange={(e) => setTxId(e.target.value.trim())} placeholder="at1…" />
           </label>
-          <Button className="mt-6 rounded-full" onClick={verify} disabled={busy}>
+          <Button className="mt-6" onClick={verify} disabled={busy}>
             {busy ? <Loader2 className="size-4 animate-spin" /> : <Send className="size-4" />} {busy ? 'Verifying…' : 'Verify proof'}
           </Button>
         </Card>
