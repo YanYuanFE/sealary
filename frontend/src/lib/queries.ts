@@ -4,15 +4,15 @@
 import { useQuery } from '@tanstack/react-query'
 import { fetchCredits, FEE } from './aleo'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
-import { getCompany, listEmployees, listPayments, listDisclosures, getMe } from './api'
+import { listCompanies, listEmployees, listPayments, listDisclosures, getMe } from './api'
 
 export const qk = {
-  company: (address: string) => ['company', address] as const,
+  companies: (address: string) => ['companies', address] as const,
   me: (address: string) => ['me', address] as const,
   disclosures: (address: string) => ['disclosures', address] as const,
   employees: (companyId: string) => ['employees', companyId] as const,
   payments: (companyId: string) => ['payments', companyId] as const,
-  salaries: (address: string) => ['salaries', address] as const, // 链上 SalaryConfig（钱包 record）
+  salaries: (address: string, tokenId: string) => ['salaries', address, tokenId] as const, // 链上 SalaryConfig（钱包 record，按组织 token 过滤）
   balance: (address: string, tokenId: string) => ['balance', address, tokenId] as const,
   credits: (address: string) => ['credits', address] as const, // 手续费余额
 }
@@ -23,9 +23,9 @@ function useAuthed() {
   return { address: address ?? '', enabled: connected && !!address }
 }
 
-export function useCompany() {
+export function useCompanies() {
   const { address, enabled } = useAuthed()
-  return useQuery({ queryKey: qk.company(address), queryFn: getCompany, enabled })
+  return useQuery({ queryKey: qk.companies(address), queryFn: listCompanies, enabled })
 }
 
 export function useMe() {

@@ -15,7 +15,8 @@ import { TxLink } from '@/components/TxLink'
 import { TierBadge } from '@/components/TierBadge'
 import { SealMark } from '@/components/brand/SealMark'
 import { tierOf, period, shortAddr, money } from '@/lib/format'
-import { PROGRAM, proveIncomeOpts, discloseOpts, waitForTx, newNonce } from '@/lib/aleo'
+import { PROGRAM, ARC22_PROGRAM, proveIncomeOpts, discloseOpts, waitForTx, newNonce } from '@/lib/aleo'
+import { fetchArc22TokenInfo, fieldToProg } from '@/lib/arc22'
 import { fetchTokenInfo, toBase, fromBase } from '@/lib/units'
 import { recordDisclosure, type Disclosure } from '@/lib/api'
 import { qk, useMe, useDisclosures, useCredits } from '@/lib/queries'
@@ -23,7 +24,9 @@ import { downloadCsv, printDocument } from '@/lib/export'
 
 // 只取子组件真正用到的钱包方法（避免要求整个 WalletContextState）。
 type Wallet = Pick<ReturnType<typeof useWallet>, 'connected' | 'address' | 'requestRecords' | 'executeTransaction' | 'transactionStatus'>
-type Stub = { uid: string; amount: bigint; period: number; employer: string; tokenId: string }
+// program：铸出这张 Paystub 的程序（registry 版 / arc22 版）——prove/disclose 必须喂回原程序。
+type Stub = { uid: string; amount: bigint; period: number; employer: string; tokenId: string; program: string }
+type TokenMeta = { decimals: number; symbol: string }
 
 // prove/disclose 提交后台确认：accepted → 记披露留痕（谁/何时/向谁——无金额）并更新 toast 为最终 tx。
 // rejected/pending 不落留痕（留痕只记真实发生的披露）。
@@ -47,7 +50,7 @@ async function confirmAndLog(
 }
 
 // 从 requestRecords 的密文明文里解析 Paystub 字段（best-effort，钱包返回结构不定 → 正则兜底）。
-function parsePaystubs(records: unknown[]): Stub[] {
+function parsePaystubs(records: unknown[], program: string): Stub[] {
   const out: Stub[] = []
   for (const r of records) {
     const s = JSON.stringify(r)
@@ -61,17 +64,28 @@ function parsePaystubs(records: unknown[]): Stub[] {
         period: Number(per),
         employer: s.match(/employer:\s*(aleo1[a-z0-9]+)/)?.[1] ?? '',
         tokenId: s.match(/token_id:\s*(\w*field)/)?.[1] ?? '',
+        program,
       })
     }
   }
-  return out.sort((a, b) => b.period - a.period)
+  return out
+}
+
+// token_id → 元数据：registry 的 field id 查 token_registry；查不到再当 arc22 程序 id 反解出
+// 程序名、读该程序的 token_info。两头都失败 → null（展示层用默认精度兜底）。
+async function resolveTokenMeta(tokenId: string): Promise<TokenMeta | null> {
+  const reg = await fetchTokenInfo(tokenId).catch(() => null)
+  if (reg) return { decimals: reg.decimals, symbol: reg.symbol || reg.name }
+  const prog = fieldToProg(tokenId)
+  if (!prog) return null
+  const arc = await fetchArc22TokenInfo(prog).catch(() => null)
+  return arc ? { decimals: arc.decimals, symbol: arc.symbol || arc.name } : null
 }
 
 export function Employee() {
   const { connected, address, requestRecords, executeTransaction, transactionStatus } = useWallet()
   const [stubs, setStubs] = useState<Stub[] | null>(null)
-  const [decimals, setDecimals] = useState(6)
-  const [symbol, setSymbol] = useState('zUSD')
+  const [meta, setMeta] = useState<Record<string, TokenMeta>>({}) // token_id → 精度/符号
   const [loading, setLoading] = useState(false)
   const qc = useQueryClient()
   const { data: identity } = useMe()
@@ -87,12 +101,20 @@ export function Employee() {
     }
     setLoading(true)
     try {
-      const records = await requestRecords(PROGRAM, true, 'unspent')
-      const parsed = parsePaystubs(records)
-      if (parsed[0]?.tokenId) {
-        const info = await fetchTokenInfo(parsed[0].tokenId).catch(() => null)
-        if (info) { setDecimals(info.decimals); setSymbol(info.symbol || info.name) }
+      // Paystub 两个来源：registry 版发薪程序 + arc22 版（USDCx 家族）。合并按期数倒序。
+      // 单边失败（如钱包未授权新程序）不拖垮另一边。
+      const [v2, arc22] = await Promise.all([
+        requestRecords(PROGRAM, true, 'unspent').catch(() => [] as unknown[]),
+        requestRecords(ARC22_PROGRAM, true, 'unspent').catch(() => [] as unknown[]),
+      ])
+      const parsed = [...parsePaystubs(v2, PROGRAM), ...parsePaystubs(arc22, ARC22_PROGRAM)]
+        .sort((a, b) => b.period - a.period)
+      const m: Record<string, TokenMeta> = {}
+      for (const tid of new Set(parsed.map((s) => s.tokenId).filter(Boolean))) {
+        const info = await resolveTokenMeta(tid)
+        if (info) m[tid] = info
       }
+      setMeta(m)
       setStubs(parsed)
       toast.success(parsed.length ? `${parsed.length} payslips decrypted` : 'No sealed payslips found')
     } catch (e) {
@@ -101,6 +123,9 @@ export function Employee() {
       setLoading(false)
     }
   }
+
+  // 某张 stub 的代币元数据；没解析到用 zUSD 的默认精度兜底（与旧行为一致）。
+  const metaOf = (s?: Stub): TokenMeta => (s && meta[s.tokenId]) || { decimals: 6, symbol: 'zUSD' }
 
   return (
     <div className="space-y-8">
@@ -117,11 +142,11 @@ export function Employee() {
           <GasBanner />
           <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
             <IdentityCard address={address!} name={identity?.person.name}
-              employer={identity?.company.name} latest={stubs[0]} decimals={decimals} />
-            <ProvePanel latest={stubs[0]} decimals={decimals} symbol={symbol} onLogged={refreshLog} hasGas={hasGas}
+              employer={identity?.company.name} latest={stubs[0]} decimals={metaOf(stubs[0]).decimals} />
+            <ProvePanel latest={stubs[0]} decimals={metaOf(stubs[0]).decimals} symbol={metaOf(stubs[0]).symbol} onLogged={refreshLog} hasGas={hasGas}
               wallet={{ connected, address, requestRecords, executeTransaction, transactionStatus }} />
           </div>
-          <Payslips stubs={stubs} decimals={decimals} symbol={symbol} hasGas={hasGas}
+          <Payslips stubs={stubs} metaOf={metaOf} hasGas={hasGas}
             employeeName={identity?.person.name} employerName={identity?.company.name} onLogged={refreshLog}
             wallet={{ connected, address, requestRecords, executeTransaction, transactionStatus }} />
         </div>
@@ -243,7 +268,8 @@ function ProvePanel({ latest, decimals, symbol, wallet, onLogged, hasGas }: {
     setBusy(true)
     try {
       // §4.2：threshold 也转 base units，与链上 Paystub.amount 同口径，否则 tier 算错。
-      const res = await executeTransaction(proveIncomeOpts(latest.uid, toBase(threshold, decimals), verifier, nonce))
+      // program 取自 stub 来源——arc22 Paystub 只能喂回 arc22 程序。
+      const res = await executeTransaction(proveIncomeOpts(latest.uid, toBase(threshold, decimals), verifier, nonce, latest.program))
       const tempId = res?.transactionId
       if (!tempId) { toast.error('Wallet returned no transaction id'); return }
       // 提交即放行；确认与披露留痕后台走（accepted 才记录，toast 跟进最终 tx id）。
@@ -324,31 +350,35 @@ function ProvePanel({ latest, decimals, symbol, wallet, onLogged, hasGas }: {
   )
 }
 
-function Payslips({ stubs, decimals, symbol, wallet, employeeName, employerName, onLogged, hasGas }: {
-  stubs: Stub[]; decimals: number; symbol: string; wallet: Wallet
+function Payslips({ stubs, metaOf, wallet, employeeName, employerName, onLogged, hasGas }: {
+  stubs: Stub[]; metaOf: (s?: Stub) => TokenMeta; wallet: Wallet
   employeeName?: string; employerName?: string; onLogged: () => void; hasGas: boolean
 }) {
   // 员工本机导出自己的 Paystub 历史（解密后数据，不经服务器）。
   async function exportCsv() {
-    const rows = [['period', 'token_id', 'symbol', 'amount', 'employer', 'record_uid']]
-    for (const s of stubs) rows.push([period(s.period), s.tokenId, symbol, String(fromBase(s.amount, decimals)), s.employer, s.uid])
-    await downloadCsv('sealary-payslips.csv', rows, { program: PROGRAM })
+    const rows = [['period', 'token_id', 'symbol', 'amount', 'employer', 'record_uid', 'program']]
+    for (const s of stubs) {
+      const m = metaOf(s)
+      rows.push([period(s.period), s.tokenId, m.symbol, String(fromBase(s.amount, m.decimals)), s.employer, s.uid, s.program])
+    }
+    await downloadCsv('sealary-payslips.csv', rows, { programs: [...new Set(stubs.map((s) => s.program))].join(' ') })
     toast.success(`Exported ${stubs.length} payslips`)
   }
 
   // 单张 payslip 打印视图（浏览器打印面板另存 PDF）。
   function printStub(s: Stub) {
+    const m = metaOf(s)
     const ok = printDocument({
       title: 'Payslip',
       subtitle: `${employerName ?? shortAddr(s.employer)} · ${period(s.period)}`,
-      amount: `${money(fromBase(s.amount, decimals))} ${symbol}`,
+      amount: `${money(fromBase(s.amount, m.decimals))} ${m.symbol}`,
       fields: [
         ['Employee', employeeName ? `${employeeName} · ${wallet.address ?? ''}` : (wallet.address ?? '')],
         ['Employer', employerName ? `${employerName} · ${s.employer}` : s.employer],
         ['Pay period', period(s.period)],
-        ['Token', `${symbol} · ${s.tokenId}`],
+        ['Token', `${m.symbol} · ${s.tokenId}`],
         ['Record', s.uid],
-        ['Program', PROGRAM],
+        ['Program', s.program],
       ],
       footnote:
         'Decrypted locally with the owner’s view key. The amount lives only in an encrypted on-chain record — no server ever saw it.',
@@ -385,14 +415,14 @@ function Payslips({ stubs, decimals, symbol, wallet, employeeName, employerName,
             {stubs.map((s) => (
               <tr key={s.uid} className="border-b border-border/50 last:border-0 hover:bg-secondary/40">
                 <td className="px-5 py-3.5 font-medium">{period(s.period)}</td>
-                <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">{symbol} · {shortAddr(s.tokenId, 4, 4)}</td>
-                <td className="px-5 py-3.5 text-right"><SealedAmount amount={fromBase(s.amount, decimals)} revealed size="sm" /></td>
+                <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">{metaOf(s).symbol} · {shortAddr(s.tokenId, 4, 4)}</td>
+                <td className="px-5 py-3.5 text-right"><SealedAmount amount={fromBase(s.amount, metaOf(s).decimals)} revealed size="sm" /></td>
                 <td className="px-5 py-3.5">
                   <div className="flex justify-end gap-2">
                     <Button variant="ghost" size="sm" onClick={() => printStub(s)} title="Print payslip (save as PDF)">
                       <Printer className="size-4" />
                     </Button>
-                    <DiscloseDialog stub={s} decimals={decimals} symbol={symbol} wallet={wallet} onLogged={onLogged} hasGas={hasGas} />
+                    <DiscloseDialog stub={s} decimals={metaOf(s).decimals} symbol={metaOf(s).symbol} wallet={wallet} onLogged={onLogged} hasGas={hasGas} />
                   </div>
                 </td>
               </tr>
@@ -417,7 +447,7 @@ function DiscloseDialog({ stub, decimals, symbol, wallet, onLogged, hasGas }: {
     if (!connected || !address || !executeTransaction) { toast.error('Connect your wallet'); return }
     setBusy(true)
     try {
-      const res = await executeTransaction(discloseOpts(stub.uid))
+      const res = await executeTransaction(discloseOpts(stub.uid, stub.program))
       const tempId = res?.transactionId
       if (!tempId) { toast.error('Wallet returned no transaction id'); return }
       // 提交即关弹窗；确认与披露留痕（含自报接收方）后台走。

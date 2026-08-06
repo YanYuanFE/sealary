@@ -6,8 +6,11 @@ export const NETWORK = Network.TESTNET
 export const PROGRAM = 'sealary_payroll_v2.aleo' // pay + pay_batch + prove_income + disclose + tier
 export const HR_PROGRAM = 'sealary_conf.aleo' // 雇主私有薪资配置（加密 record，后端不存薪资）
 export const DECRYPT = DecryptPermission.UponRequest
+// ARC-22（USDCx 家族）发薪程序：动态分发调代币（pay/pay_batch/prove_income/disclose），见 lib/arc22.ts。
+export const ARC22_PROGRAM = 'sealary_pay_arc22.aleo'
+export const KNOWN_ARC22 = ['test_usdcx_stablecoin.aleo', 'usdcx_stablecoin.aleo']
 // credits.aleo 也要授权：手续费余额判断需要读私有 credits record，否则只能看到 public 那一半。
-export const CONNECT_PROGRAMS = [PROGRAM, HR_PROGRAM, 'token_registry.aleo', 'credits.aleo']
+export const CONNECT_PROGRAMS = [PROGRAM, HR_PROGRAM, ARC22_PROGRAM, 'token_registry.aleo', 'credits.aleo', ...KNOWN_ARC22]
 
 // REST 查询端点（链上只读：mapping / program）。
 export const ENDPOINT = 'https://api.explorer.provable.com/v1'
@@ -82,17 +85,18 @@ export async function waitForTx(
 // record 入参不再直接塞对象：用 { type:'record', program, recordname, uid } 引用，
 // uid 来自 requestRecords 返回的 RecordEnvelope.uid（Shield 等 conforming 钱包填充）。
 
-// prove_income(p: Paystub, public threshold: u128)
 // prove_income(p: Paystub, threshold, verifier, nonce)
 // verifier/nonce 公开回吐：转发给第三方时 verifier 对不上，旧证明重放时 nonce 对不上。
+// program 参数：Paystub 属于铸它的程序（registry 版 = PROGRAM，arc22 版 = ARC22_PROGRAM），
+// 两程序的 prove_income 同构，record 只能喂回原程序。
 export function proveIncomeOpts(
-  paystubUid: string, threshold: number | bigint, verifier: string, nonce: string,
+  paystubUid: string, threshold: number | bigint, verifier: string, nonce: string, program: string = PROGRAM,
 ): TransactionOptions {
   return {
-    program: PROGRAM,
+    program,
     function: 'prove_income',
     inputs: [
-      { type: 'record', program: PROGRAM, recordname: 'Paystub', uid: paystubUid },
+      { type: 'record', program, recordname: 'Paystub', uid: paystubUid },
       `${threshold}u128`,
       verifier,
       nonce,
@@ -108,12 +112,12 @@ export function newNonce(): string {
   return `${[...b].reduce((n, x) => (n << 8n) | BigInt(x), 0n)}field`
 }
 
-// disclose(p: Paystub)
-export function discloseOpts(paystubUid: string): TransactionOptions {
+// disclose(p: Paystub)——program 语义同 proveIncomeOpts。
+export function discloseOpts(paystubUid: string, program: string = PROGRAM): TransactionOptions {
   return {
-    program: PROGRAM,
+    program,
     function: 'disclose',
-    inputs: [{ type: 'record', program: PROGRAM, recordname: 'Paystub', uid: paystubUid }],
+    inputs: [{ type: 'record', program, recordname: 'Paystub', uid: paystubUid }],
     fee: FEE,
   }
 }

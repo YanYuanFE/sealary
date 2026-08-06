@@ -1,0 +1,9 @@
+{
+  "program": "sealary_pay_arc22.aleo",
+  "version": "0.1.0",
+  "description": "Sealary payroll for ARC-22 compliant tokens (USDCx family) via dynamic dispatch",
+  "license": "MIT",
+  "leo": "4.4.0",
+  "dependencies": null,
+  "dev_dependencies": null
+}

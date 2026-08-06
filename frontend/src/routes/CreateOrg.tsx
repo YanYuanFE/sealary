@@ -9,8 +9,9 @@ import { Card } from '@/components/ui/card'
 import { PageHeader } from '@/components/PageHeader'
 import { TokenCard } from '@/components/TokenCard'
 import { ConnectButton } from '@/components/ConnectButton'
-import { createCompany } from '@/lib/api'
-import { qk, useCompany } from '@/lib/queries'
+import { createCompany, type Company } from '@/lib/api'
+import { qk } from '@/lib/queries'
+import { fetchArc22TokenInfo, progField } from '@/lib/arc22'
 import type { TokenInfo } from '@/lib/units'
 
 export function CreateOrg() {
@@ -18,11 +19,11 @@ export function CreateOrg() {
   const { connected, address } = useWallet()
   const [name, setName] = useState('')
   const [payDay, setPayDay] = useState(25) // 每月发薪日
-  const [tokenId, setTokenId] = useState('')
+  const [family, setFamily] = useState<Company['tokenFamily']>('registry')
+  const [tokenId, setTokenId] = useState('') // registry: field id；arc22: 代币程序名
   const [token, setToken] = useState<TokenInfo | null>(null)
   const [busy, setBusy] = useState(false)
   const qc = useQueryClient()
-  const { data: existing } = useCompany()
 
   const ready = connected && !!address && name.trim() !== '' && !!token && !busy
 
@@ -30,10 +31,20 @@ export function CreateOrg() {
     if (!ready || !address || !token) return
     setBusy(true)
     try {
-      const created = await createCompany({ name: name.trim(), tokenId: tokenId.trim(), symbol: token.symbol || token.name, decimals: token.decimals, payDay })
-      qc.setQueryData(qk.company(address), created) // 免得 /employer 用旧的 null 缓存显示"还没有组织"
+      const arc22 = family === 'arc22'
+      const created = await createCompany({
+        name: name.trim(),
+        // arc22 的 token_id 存程序 id 的 field 编码——与链上 SalaryConfig/Paystub 同值，读取端不分家族。
+        tokenId: arc22 ? progField(tokenId.trim()) : tokenId.trim(),
+        symbol: token.symbol || token.name,
+        decimals: token.decimals,
+        payDay,
+        tokenFamily: family,
+        tokenProgram: arc22 ? tokenId.trim() : null,
+      })
+      qc.setQueryData(qk.companies(address), (old: Company[] | undefined) => [...(old ?? []), created]) // 免得列表/详情用旧缓存显示"还没有组织"
       toast.success(`Organization “${name.trim()}” created`, { description: `Payroll token ${token.symbol || token.name} · ${token.decimals} decimals` })
-      navigate('/employer')
+      navigate(`/employer/${created.id}`)
     } catch (e) {
       toast.error('Create failed', { description: String((e as Error)?.message ?? e) })
     } finally {
@@ -55,14 +66,6 @@ export function CreateOrg() {
           <p className="text-sm text-muted-foreground">Connect your employer wallet to create an organization.</p>
           <ConnectButton />
         </Card>
-      ) : existing ? (
-        <Card className="space-y-3 p-6">
-          <p className="text-sm text-muted-foreground">This wallet already owns an organization:</p>
-          <div className="font-heading text-lg font-semibold">{existing.name}</div>
-          <Button onClick={() => navigate('/employer')}>
-            Go to console <ArrowRight className="size-4" />
-          </Button>
-        </Card>
       ) : (
         <Card className="space-y-4 p-6">
           <Field label="Company name">
@@ -75,10 +78,35 @@ export function CreateOrg() {
               ))}
             </select>
           </Field>
-          <Field label="Payroll token_id">
-            <input className="field font-mono text-xs" value={tokenId} onChange={(e) => setTokenId(e.target.value.trim())} placeholder="7777field" />
+          <Field label="Token type">
+            <div className="grid grid-cols-2 gap-2">
+              {([['registry', 'Registry token', 'token_registry.aleo (zUSD, vUSDC…)'], ['arc22', 'Compliant stablecoin', 'ARC-22 program (USDCx…)']] as const).map(([f, label, hint]) => (
+                <button
+                  key={f} type="button"
+                  onClick={() => { setFamily(f); setTokenId(''); setToken(null) }}
+                  className={`rounded-lg border p-3 text-left text-sm transition-colors ${family === f ? 'border-seal bg-seal/5' : 'border-border hover:border-seal/40'}`}
+                >
+                  <span className="block font-medium text-foreground">{label}</span>
+                  <span className="mt-0.5 block text-xs text-muted-foreground">{hint}</span>
+                </button>
+              ))}
+            </div>
           </Field>
-          <TokenCard tokenId={tokenId} onResolved={setToken} />
+          <Field label={family === 'arc22' ? 'Token program' : 'Payroll token_id'}>
+            <input
+              className="field font-mono text-xs" value={tokenId}
+              onChange={(e) => setTokenId(e.target.value.trim())}
+              placeholder={family === 'arc22' ? 'test_usdcx_stablecoin.aleo' : '7777field'}
+            />
+          </Field>
+          {family === 'arc22' ? (
+            <TokenCard
+              tokenId={tokenId} onResolved={setToken} resolve={fetchArc22TokenInfo}
+              errorHint={<span>No ARC-22 token found — enter the stablecoin program name, e.g. <span className="font-mono">test_usdcx_stablecoin.aleo</span>.</span>}
+            />
+          ) : (
+            <TokenCard tokenId={tokenId} onResolved={setToken} />
+          )}
           <Button className="w-full" disabled={!ready} onClick={submit}>
             Create organization <ArrowRight className="size-4" />
           </Button>

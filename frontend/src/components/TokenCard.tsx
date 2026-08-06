@@ -7,7 +7,14 @@ type State = { kind: 'idle' } | { kind: 'loading' } | { kind: 'ok'; info: TokenI
 
 // 输入 token_id → 链上拉取代币信息、渲染确认卡；拉不到则报错。防抖 400ms。
 // onResolved：把有效 TokenInfo（或 null）上抛给父组件用于启用/禁用提交。
-export function TokenCard({ tokenId, onResolved }: { tokenId: string; onResolved: (info: TokenInfo | null) => void }) {
+// resolve：可换解析器（默认 registry 的 fetchTokenInfo；ARC-22 传 fetchArc22TokenInfo）。
+// errorHint：解析失败时的提示；缺省用 registry 的 token_id 格式指路。
+export function TokenCard({ tokenId, onResolved, resolve = fetchTokenInfo, errorHint }: {
+  tokenId: string
+  onResolved: (info: TokenInfo | null) => void
+  resolve?: (id: string) => Promise<TokenInfo | null>
+  errorHint?: React.ReactNode
+}) {
   const [state, setState] = useState<State>({ kind: 'idle' })
   const timer = useRef<ReturnType<typeof setTimeout>>(undefined)
 
@@ -21,13 +28,13 @@ export function TokenCard({ tokenId, onResolved }: { tokenId: string; onResolved
     }
     setState({ kind: 'loading' })
     timer.current = setTimeout(async () => {
-      const info = await fetchTokenInfo(id).catch(() => null)
+      const info = await resolve(id).catch(() => null)
       setState(info ? { kind: 'ok', info } : { kind: 'error' })
       onResolved(info)
     }, 400)
     return () => clearTimeout(timer.current)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tokenId])
+  }, [tokenId, resolve])
 
   if (state.kind === 'idle') return null
 
@@ -40,9 +47,19 @@ export function TokenCard({ tokenId, onResolved }: { tokenId: string; onResolved
   }
 
   if (state.kind === 'error') {
+    // 程序名（xxx.aleo）不是 token_id——registry 映射键是 field 字面量，这类输入单独指路。
+    const looksLikeField = /^\d+field$/.test(tokenId.trim())
     return (
       <div className="flex items-center gap-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2.5 text-sm text-destructive">
-        <CircleAlert className="size-4" /> 该 token_id 未在 token_registry 注册，请检查。
+        <CircleAlert className="size-4 shrink-0" />
+        {errorHint ?? (looksLikeField ? (
+          <span>This token_id is not registered in token_registry — double-check it.</span>
+        ) : (
+          <span>
+            Not a token_id. Enter the <span className="font-mono">field</span> value the token was registered
+            with (e.g. <span className="font-mono">7777field</span>) — a program name won’t resolve.
+          </span>
+        ))}
       </div>
     )
   }

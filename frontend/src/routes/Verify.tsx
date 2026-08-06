@@ -7,7 +7,8 @@ import { PageHeader } from '@/components/PageHeader'
 import { TierBadge } from '@/components/TierBadge'
 import { TxLink } from '@/components/TxLink'
 import { money, shortAddr, period, type Tier } from '@/lib/format'
-import { API_BASE, PROGRAM } from '@/lib/aleo'
+import { API_BASE, PROGRAM, ARC22_PROGRAM } from '@/lib/aleo'
+import { fieldToProg, fetchArc22TokenInfo } from '@/lib/arc22'
 import { fetchTokenInfo, fromBase } from '@/lib/units'
 
 type Result = {
@@ -29,7 +30,9 @@ async function fetchProveResult(txId: string): Promise<Omit<Result, 'threshold' 
   if (!res.ok) return null
   const tx = await res.json()
   const transitions = tx?.execution?.transitions ?? []
-  const t = transitions.find((x: { program?: string; function?: string }) => x.program === PROGRAM && x.function === 'prove_income')
+  // 两个发薪程序（registry 版 / arc22 版）的 prove_income 同构，公开输出同序——都认。
+  const t = transitions.find((x: { program?: string; function?: string }) =>
+    (x.program === PROGRAM || x.program === ARC22_PROGRAM) && x.function === 'prove_income')
   if (!t) return null
   // 公开输出顺序：tier(u8), employer(address), token_id(field), period(u32), verifier(address), nonce(field)
   const pub = (t.outputs ?? []).filter((o: { type?: string }) => o.type === 'public').map((o: { value?: string }) => o.value)
@@ -62,7 +65,12 @@ export function Verify() {
         toast.error('No prove_income attestation in this tx', { description: 'Paste the tx id of the employee’s Generate-proof transaction.' })
         return
       }
-      const info = await fetchTokenInfo(r.tokenId).catch(() => null)
+      // token_id 先按 registry 查；查不到再当 arc22 程序 id 反解程序名查 token_info。
+      let info = await fetchTokenInfo(r.tokenId).catch(() => null)
+      if (!info) {
+        const prog = fieldToProg(r.tokenId)
+        if (prog) info = await fetchArc22TokenInfo(prog).catch(() => null)
+      }
       const decimals = info?.decimals ?? 0
       setResult({
         tier: r.tier,

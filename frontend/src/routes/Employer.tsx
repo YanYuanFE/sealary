@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, Navigate, useParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useWallet } from '@provablehq/aleo-wallet-adaptor-react'
 import { toast } from 'sonner'
-import { Eye, EyeOff, Send, UserPlus, Upload, Download, Coins, Building2, Loader2, Trash2, Printer, Gift, FileText, Copy, Pencil } from 'lucide-react'
+import { Eye, EyeOff, Send, UserPlus, Upload, Download, Coins, Building2, Loader2, Trash2, Printer, Gift, FileText, Copy, Pencil, ArrowRight, ArrowLeft } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import {
@@ -18,10 +18,11 @@ import { GasBanner } from '@/components/GasBanner'
 import { Card } from '@/components/ui/card'
 import { shortAddr, money, period } from '@/lib/format'
 import { payOpts, payBatchOpts, PAY_BATCH, setSalaryOpts, updateSalaryOpts, setSalaryBatchOpts, SALARY_BATCH, HR_PROGRAM, waitForTx } from '@/lib/aleo'
+import { freezeProofs, payArc22Opts, payBatchArc22Opts } from '@/lib/arc22'
 import { toBase, fromBase } from '@/lib/units'
 import { downloadCsv, printDocument } from '@/lib/export'
 import { addEmployee, forgetEmployee, recordPayment, type AddResult, type Company, type Person, type Payment } from '@/lib/api'
-import { qk, useCompany, useCredits, useEmployees, usePayments } from '@/lib/queries'
+import { qk, useCompanies, useCredits, useEmployees, usePayments } from '@/lib/queries'
 
 const isAleoAddr = (a: string) => /^aleo1[a-z0-9]{58}$/.test(a)
 
@@ -84,33 +85,38 @@ type Wallet = Pick<ReturnType<typeof useWallet>, 'requestRecords' | 'executeTran
 // 精确匹配 token_id（\b 防 "7777field" 撞上 "17777field" 的子串）。
 const hasTokenId = (recordJson: string, tokenId: string) => new RegExp(`token_id:\\s*${tokenId}\\b`).test(recordJson)
 
-// 选发薪 Token record：匹配 token_id 且余额 ≥ 本批总额的最大一张。
+// 发薪 record 的来源与过滤按家族分流：registry 记录在 token_registry 里、带 token_id 要过滤；
+// arc22 记录就在代币程序自己名下（usdcx Token 只有 owner+amount），程序即币种，无需过滤。
+const payProgramOf = (c: Company) => (c.tokenFamily === 'arc22' ? c.tokenProgram! : 'token_registry.aleo')
+const matchesCompany = (c: Company, recordJson: string) => c.tokenFamily === 'arc22' || hasTokenId(recordJson, c.tokenId)
+
+// 选发薪 Token record：属于本组织代币且余额 ≥ 本批总额的最大一张。
 // 不能拿 recs[0]：pay_batch 补位会给雇主自己留 0 额找零 record，选中它整批 underflow。
-async function pickTokenUid(requestRecords: Wallet['requestRecords'], tokenId: string, need: bigint): Promise<string | undefined> {
-  const recs = await requestRecords('token_registry.aleo', true, 'unspent')
+async function pickTokenUid(requestRecords: Wallet['requestRecords'], company: Company, need: bigint): Promise<string | undefined> {
+  const recs = await requestRecords(payProgramOf(company), true, 'unspent')
   let best: { uid: string; amount: bigint } | undefined
   for (const r of recs ?? []) {
     const s = JSON.stringify(r)
     const uid = (r as { uid?: string })?.uid
     const amt = s.match(/amount:\s*(\d+)u128/)?.[1]
-    if (!uid || !amt || !hasTokenId(s, tokenId)) continue
+    if (!uid || !amt || !matchesCompany(company, s)) continue
     const amount = BigInt(amt)
     if (amount >= need && (!best || amount > best.amount)) best = { uid, amount }
   }
   return best?.uid
 }
 
-async function fetchBalance(requestRecords: Wallet['requestRecords'], tokenId: string, decimals: number): Promise<number | null> {
+async function fetchBalance(requestRecords: Wallet['requestRecords'], company: Company): Promise<number | null> {
   try {
-    const recs = await requestRecords('token_registry.aleo', true, 'unspent')
+    const recs = await requestRecords(payProgramOf(company), true, 'unspent')
     let sum = 0n
     for (const r of recs) {
       const s = JSON.stringify(r)
-      if (!hasTokenId(s, tokenId)) continue
+      if (!matchesCompany(company, s)) continue
       const amt = s.match(/amount:\s*(\d+)u128/)?.[1]
       if (amt) sum += BigInt(amt)
     }
-    return fromBase(sum, decimals)
+    return fromBase(sum, company.decimals)
   } catch {
     return null
   }
@@ -120,12 +126,14 @@ type SalaryCfg = { amount: bigint; uid: string } // uid 用于 update_salary 消
 
 // 解析雇主自有的 SalaryConfig 加密 record → { 员工地址: { 薪资(base units), uid } }。
 // 薪资只在链上加密、只雇主能解——后端永不接触（PRIVACY_AUDIT 方案 D）。
+// 按 tokenId 过滤：多组织共用一个钱包，链上 record 只带 token_id——它就是组织边界，不滤会串账。
 // 同一员工若有多条（历史上重复 set_salary 产生），谁排后谁赢——record 无高度戳分不出新旧；
 // 写入端一律走 set/update 分流（已有配置 → update_salary 消费旧的），不再制造新重复。
-function parseSalaryConfigs(records: unknown[]): Record<string, SalaryCfg> {
+function parseSalaryConfigs(records: unknown[], tokenId: string): Record<string, SalaryCfg> {
   const out: Record<string, SalaryCfg> = {}
   for (const r of records) {
     const s = JSON.stringify(r)
+    if (!hasTokenId(s, tokenId)) continue
     const employee = s.match(/employee:\s*(aleo1[a-z0-9]+)/)?.[1]
     const amount = s.match(/amount:\s*(\d+)u128/)?.[1]
     const uid = (r as { uid?: string })?.uid
@@ -135,9 +143,9 @@ function parseSalaryConfigs(records: unknown[]): Record<string, SalaryCfg> {
   return out
 }
 
-async function fetchSalaries(requestRecords: Wallet['requestRecords']): Promise<Record<string, SalaryCfg>> {
+async function fetchSalaries(requestRecords: Wallet['requestRecords'], tokenId: string): Promise<Record<string, SalaryCfg>> {
   try {
-    return parseSalaryConfigs(await requestRecords(HR_PROGRAM, true, 'unspent'))
+    return parseSalaryConfigs(await requestRecords(HR_PROGRAM, true, 'unspent'), tokenId)
   } catch {
     return {}
   }
@@ -147,11 +155,11 @@ async function fetchSalaries(requestRecords: Wallet['requestRecords']): Promise<
 // 只能轮询到真的读出新金额为止（猜一个固定延迟必然要么太早要么太久）。
 // 返回 false = 到点还没读到，调用方据此提示"稍后刷新"，而不是假装已经好了。
 async function waitForSalary(
-  requestRecords: Wallet['requestRecords'], address: string, expected: bigint,
+  requestRecords: Wallet['requestRecords'], address: string, expected: bigint, tokenId: string,
 ): Promise<boolean> {
   const deadline = Date.now() + 60_000
   while (Date.now() < deadline) {
-    if ((await fetchSalaries(requestRecords))[address]?.amount === expected) return true
+    if ((await fetchSalaries(requestRecords, tokenId))[address]?.amount === expected) return true
     await new Promise((r) => setTimeout(r, 2_000))
   }
   return false
@@ -162,7 +170,7 @@ async function waitForSalary(
 // expect 为 null（批量导入，一次多人）时只等链上 accepted，不逐个校验金额。
 async function sealSalary(
   wallet: Pick<Wallet, 'transactionStatus' | 'requestRecords'>, tempId: string,
-  expect: { address: string; amount: bigint } | null, onDone: () => void,
+  expect: { address: string; amount: bigint; tokenId: string } | null, onDone: () => void,
 ): Promise<void> {
   const toastId = toast.loading('Sealing salary on-chain…')
   const fin = await waitForTx(wallet.transactionStatus, tempId)
@@ -177,7 +185,7 @@ async function sealSalary(
     return
   }
   toast.loading('Sealed — waiting for your wallet to pick it up…', { id: toastId })
-  const visible = expect ? await waitForSalary(wallet.requestRecords, expect.address, expect.amount) : true
+  const visible = expect ? await waitForSalary(wallet.requestRecords, expect.address, expect.amount, expect.tokenId) : true
   onDone()
   if (visible) toast.success('Salary sealed on-chain', { id: toastId, description: <TxLink txId={fin.txId} /> })
   else toast.warning('Sealed on-chain, but your wallet has not indexed it yet', {
@@ -185,9 +193,79 @@ async function sealSalary(
   })
 }
 
+// 组织列表页（/employer）：钱包下所有组织，点卡片进各自的控制台（/employer/:id）。
 export function Employer() {
+  const { connected } = useWallet()
+  const { data: companies = [], isPending } = useCompanies()
+
+  if (!connected) {
+    return (
+      <Gate icon={<Building2 className="size-8 text-seal" />} text="Connect your employer wallet to see your organizations.">
+        <ConnectButton />
+      </Gate>
+    )
+  }
+  if (isPending) {
+    return <Gate icon={<Loader2 className="size-8 animate-spin text-seal" />} text="Loading your organizations…">{null}</Gate>
+  }
+  if (companies.length === 0) {
+    return (
+      <Gate icon={<Building2 className="size-8 text-seal" />} text="No organization on this wallet yet.">
+        <Button asChild><Link to="/setup">Create organization</Link></Button>
+      </Gate>
+    )
+  }
+  return (
+    <div className="space-y-8">
+      <PageHeader
+        eyebrow="Employer"
+        title="Your organizations"
+        desc="Each organization runs payroll with its own token. Pick one to open its console."
+        actions={
+          <Button asChild>
+            <Link to="/setup"><Building2 className="size-4" /> New organization</Link>
+          </Button>
+        }
+      />
+      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        {companies.map((c) => (
+          <Link key={c.id} to={`/employer/${c.id}`} className="group">
+            <Card className="h-full gap-4 p-6 transition-all group-hover:-translate-y-0.5 group-hover:ring-seal/40">
+              <div className="flex items-start justify-between">
+                <div className="flex items-center gap-3">
+                  <div className="flex size-10 shrink-0 items-center justify-center rounded-lg bg-seal/10 text-seal">
+                    <Building2 className="size-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="truncate font-heading text-lg font-semibold text-foreground">{c.name}</div>
+                    <div className="font-mono text-xs text-muted-foreground">{shortAddr(c.tokenId, 6, 6)}</div>
+                  </div>
+                </div>
+                <ArrowRight className="mt-1 size-4 shrink-0 text-muted-foreground transition-transform group-hover:translate-x-0.5 group-hover:text-seal" />
+              </div>
+              <div className="flex gap-8 border-t border-border/60 pt-4">
+                <div>
+                  <p className="font-mono text-[10px] tracking-wide text-muted-foreground uppercase">Token</p>
+                  <p className="mt-0.5 text-sm font-medium text-foreground">{c.symbol}</p>
+                </div>
+                <div>
+                  <p className="font-mono text-[10px] tracking-wide text-muted-foreground uppercase">Pay day</p>
+                  <p className="mt-0.5 text-sm font-medium text-foreground">Day {c.payDay}</p>
+                </div>
+              </div>
+            </Card>
+          </Link>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// 组织详情页（/employer/:id）：该组织的发薪控制台。URL 即选中组织，无另存状态。
+export function OrgDetail() {
+  const { id } = useParams()
   const { connected, address, executeTransaction, requestRecords, transactionStatus } = useWallet()
-  const { data: company, isPending } = useCompany()
+  const { data: companies = [], isPending } = useCompanies()
 
   if (!connected || !address) {
     return (
@@ -199,14 +277,17 @@ export function Employer() {
   if (isPending) {
     return <Gate icon={<Loader2 className="size-8 animate-spin text-seal" />} text="Loading your organization…">{null}</Gate>
   }
-  if (!company) {
-    return (
-      <Gate icon={<Building2 className="size-8 text-seal" />} text="No organization on this wallet yet.">
-        <Button asChild><Link to="/setup">Create organization</Link></Button>
-      </Gate>
-    )
-  }
-  return <Console company={company} address={address} executeTransaction={executeTransaction} requestRecords={requestRecords} transactionStatus={transactionStatus} />
+  const company = companies.find((c) => c.id === id)
+  if (!company) return <Navigate to="/employer" replace />
+  return (
+    <div className="space-y-4">
+      <Link to="/employer" className="inline-flex items-center gap-1.5 text-sm text-muted-foreground transition-colors hover:text-seal">
+        <ArrowLeft className="size-4" /> Organizations
+      </Link>
+      {/* key=组织 id：/employer/:id 间切换同一路由元素不卸载，靠 key 重置控制台内部状态 */}
+      <Console key={company.id} company={company} address={address} executeTransaction={executeTransaction} requestRecords={requestRecords} transactionStatus={transactionStatus} />
+    </div>
+  )
 }
 
 function Gate({ icon, text, children }: { icon: React.ReactNode; text: string; children: React.ReactNode }) {
@@ -236,13 +317,13 @@ function Console({ company, address, executeTransaction, requestRecords, transac
   const { data: roster = [], isPending: loading } = useEmployees(company.id)
   const { data: payments = [] } = usePayments(company.id) // 发薪记录（后端元数据，无金额）
   // 链上 record 读取也走 query：付款/调薪后 invalidate 即重取，与后端数据同一套失效逻辑。
-  const { data: salaries = {} } = useQuery({ // 地址 → 薪资(base)+uid，来自链上 SalaryConfig
-    queryKey: qk.salaries(address),
-    queryFn: () => fetchSalaries(requestRecords),
+  const { data: salaries = {} } = useQuery({ // 地址 → 薪资(base)+uid，来自链上 SalaryConfig（按组织 token 过滤）
+    queryKey: qk.salaries(address, company.tokenId),
+    queryFn: () => fetchSalaries(requestRecords, company.tokenId),
   })
   const { data: balance = null } = useQuery({
     queryKey: qk.balance(address, company.tokenId),
-    queryFn: () => fetchBalance(requestRecords, company.tokenId, company.decimals),
+    queryFn: () => fetchBalance(requestRecords, company),
   })
 
   // Paid = 本期已有【周期工资】记录（bonus 不占用——同期可加发，月度批仍会包含此人）。
@@ -272,7 +353,7 @@ function Console({ company, address, executeTransaction, requestRecords, transac
 
   function refresh() {
     void qc.invalidateQueries({ queryKey: qk.employees(company.id) })
-    void qc.invalidateQueries({ queryKey: qk.salaries(address) })
+    void qc.invalidateQueries({ queryKey: qk.salaries(address, company.tokenId) })
     void qc.invalidateQueries({ queryKey: qk.payments(company.id) })
   }
 
@@ -342,12 +423,16 @@ function Console({ company, address, executeTransaction, requestRecords, transac
     setBusy(true)
     try {
       const amt = toBase(amountHuman, company.decimals)
-      const uid = await pickTokenUid(requestRecords, company.tokenId, amt)
+      const uid = await pickTokenUid(requestRecords, company, amt)
       if (!uid) {
         toast.error('No Token record covers this amount', { description: `Need a single unspent ${company.symbol} record ≥ the amount — mint or consolidate first.` })
         return
       }
-      const res = await executeTransaction(payOpts(uid, person.walletAddress, amt, CURRENT_PERIOD))
+      // ARC-22：付款人（雇主）要附冻结名单非成员证明——本地算，地址不出机器。
+      const opts = company.tokenFamily === 'arc22'
+        ? payArc22Opts(company.tokenProgram!, uid, person.walletAddress, amt, CURRENT_PERIOD, await freezeProofs(company.tokenProgram!, address))
+        : payOpts(uid, person.walletAddress, amt, CURRENT_PERIOD)
+      const res = await executeTransaction(opts)
       const tempId = res?.transactionId
       if (!tempId) {
         toast.error('Wallet returned no transaction id')
@@ -387,12 +472,16 @@ function Console({ company, address, executeTransaction, requestRecords, transac
       const tos = Array.from({ length: PAY_BATCH }, (_, i) => targets[i]?.walletAddress ?? address)
       const amounts = Array.from({ length: PAY_BATCH }, (_, i) => (targets[i] ? salaries[targets[i].walletAddress].amount : 0n))
       const need = amounts.reduce((s, a) => s + a, 0n)
-      const uid = await pickTokenUid(requestRecords, company.tokenId, need)
+      const uid = await pickTokenUid(requestRecords, company, need)
       if (!uid) {
         toast.error('No Token record covers this batch', { description: `Need a single unspent ${company.symbol} record ≥ the batch total — mint or consolidate first.` })
         return
       }
-      const res = await executeTransaction(payBatchOpts(uid, tos, amounts, CURRENT_PERIOD))
+      // ARC-22：付款人固定是雇主，一份冻结名单证明 4 笔链式转账复用。
+      const opts = company.tokenFamily === 'arc22'
+        ? payBatchArc22Opts(company.tokenProgram!, uid, tos, amounts, CURRENT_PERIOD, await freezeProofs(company.tokenProgram!, address))
+        : payBatchOpts(uid, tos, amounts, CURRENT_PERIOD)
+      const res = await executeTransaction(opts)
       const tempId = res?.transactionId
       if (!tempId) {
         toast.error('Wallet returned no transaction id')
@@ -854,7 +943,7 @@ function AddEmployee({ companyId, tokenId, symbol, decimals, salaries, executeTr
       onAdded() // 后端姓名立刻生效
       // 薪资在链上：executeTransaction 只是提交，此刻 requestRecords 读回的还是旧 SalaryConfig。
       // 不等确认就收工，界面会显示改前的金额（编辑）或 "— sealing…"（新增），看着像没生效。
-      if (tempId) void sealSalary({ transactionStatus, requestRecords }, tempId, { address, amount: base }, onAdded)
+      if (tempId) void sealSalary({ transactionStatus, requestRecords }, tempId, { address, amount: base, tokenId }, onAdded)
     } catch (e) {
       toast.error(editing ? 'Update failed' : 'Add failed', { description: String((e as Error)?.message ?? e) })
     } finally {

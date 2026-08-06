@@ -6,10 +6,12 @@ import { authHeaders, authReady } from './auth'
 export type Company = {
   id: string
   name: string
-  tokenId: string
+  tokenId: string // registry: 注册表 field id；arc22: 代币程序 id 的 field 编码（链上记录同值）
   symbol: string
   decimals: number
   payDay: number // 每月发薪日（1-28）
+  tokenFamily: 'registry' | 'arc22'
+  tokenProgram: string | null // arc22 才有：代币程序名（读 record/元数据用）
 }
 
 // 后端只存身份 PII（name/address）——薪资绝不进后端（隐私红线，见 PRIVACY_AUDIT）。
@@ -33,9 +35,9 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>
 }
 
-// 当前雇主的组织（认证钱包）。未建则 null。
-export function getCompany() {
-  return req<Company | null>('/companies')
+// 当前雇主的组织列表（认证钱包）。可多个，token_id 每钱包唯一。
+export function listCompanies() {
+  return req<Company[]>('/companies')
 }
 
 export function createCompany(input: Omit<Company, 'id'>) {

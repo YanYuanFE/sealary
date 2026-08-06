@@ -6,7 +6,7 @@ create extension if not exists pgcrypto;
 
 create table if not exists company (
   id            uuid primary key default gen_random_uuid(),
-  employer_wallet text not null unique,          -- 雇主钱包地址（链上链下关联键）
+  employer_wallet text not null,                 -- 雇主钱包地址（链上链下关联键）
   name          text not null,
   region        text not null default 'EU',      -- 废弃：代码不再读写，靠 default 兜底；留列免迁移
   token_id      text not null,                   -- 薪资币 token_id（field），雇主自带
@@ -96,3 +96,15 @@ create table if not exists access_audit_log (
 );
 
 create index if not exists idx_person_taxhmac on person(tax_id_hmac);
+
+-- 多组织：一个钱包可建多个组织，employer_wallet 不再全局唯一。
+-- (employer_wallet, token_id) 唯一——链上 SalaryConfig/Paystub 只带 token_id 不带组织，
+-- 靠 token 区分组织；同钱包两组织共用一个 token 会导致链上记录混账，必须挡掉。
+alter table company drop constraint if exists company_employer_wallet_key;
+create unique index if not exists idx_company_wallet_token on company(employer_wallet, token_id);
+
+-- 代币家族：registry = token_registry.aleo（token_id 为注册表 field id）；
+-- arc22 = 独立合规代币（USDCx 家族，token_id 为代币程序 id 的 field 编码，token_program 存程序名）。
+-- token_id 两个家族同列——链上 SalaryConfig/Paystub 的 token_id 与之同值，读取端过滤逻辑不分家族。
+alter table company add column if not exists token_family text not null default 'registry';
+alter table company add column if not exists token_program text;

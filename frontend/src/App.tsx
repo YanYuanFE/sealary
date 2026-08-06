@@ -4,7 +4,7 @@ import { Providers } from '@/providers'
 import { AppShell } from '@/components/layout/AppShell'
 import { Home } from '@/routes/Home'
 import { CreateOrg } from '@/routes/CreateOrg'
-import { Employer } from '@/routes/Employer'
+import { Employer, OrgDetail } from '@/routes/Employer'
 import { Employee } from '@/routes/Employee'
 import { Verify } from '@/routes/Verify'
 import { Docs } from '@/routes/Docs'
@@ -18,6 +18,7 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/setup" element={<CreateOrg />} />
             <Route path="/employer" element={<Employer />} />
+            <Route path="/employer/:id" element={<OrgDetail />} />
             <Route path="/employee" element={<Employee />} />
             <Route path="/verify" element={<Verify />} />
             <Route path="/docs" element={<Docs />} />
