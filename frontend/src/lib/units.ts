@@ -24,6 +24,10 @@ export function u128ToAscii(n: bigint): string {
   return s
 }
 
+// 大端变体：ARC-22（USDCx 家族）的 name/symbol 按大端打包——首字符在最高字节，
+// 与 registry 常见的小端相反（用小端解会得到 "xCDSU" 这类倒序串）。
+export const u128ToAsciiBE = (n: bigint): string => [...u128ToAscii(n)].reverse().join('')
+
 export type TokenInfo = {
   tokenId: string
   name: string

@@ -2,7 +2,7 @@
 // 发薪走 sealary_pay_arc22.aleo 的动态分发（call.dynamic），代币程序 id 是运行时参数。
 import type { TransactionOptions } from '@provablehq/aleo-types'
 import { API_BASE, FEE, NETWORK, ARC22_PROGRAM } from './aleo'
-import { u128ToAscii, type TokenInfo } from './units'
+import { u128ToAsciiBE, type TokenInfo } from './units'
 
 // 程序名（含或不含 .aleo 后缀）→ field：snarkVM Identifier 编码 = 名字 ASCII 字节小端整数。
 export function progField(program: string): string {
@@ -44,8 +44,8 @@ export async function fetchArc22TokenInfo(program: string): Promise<TokenInfo | 
   if (!name || !decimals) return null
   return {
     tokenId: progField(program),
-    name: u128ToAscii(BigInt(name)),
-    symbol: u128ToAscii(BigInt(symbol ?? name)),
+    name: u128ToAsciiBE(BigInt(name)),
+    symbol: u128ToAsciiBE(BigInt(symbol ?? name)),
     decimals: Number(decimals),
     admin: '', // ARC-22 的 token_info 无 admin 字段（治理在 multisig core），展示层留空
     supply: BigInt(field(/supply:\s*(\d+)u128/) ?? '0'),
