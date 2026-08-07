@@ -6,7 +6,7 @@ Payroll is the most sensitive personal financial data there is. On a transparent
 
 | | What happens | Who learns what |
 |---|---|---|
-| **Pay** | Atomic transition: private `transfer_private` of a real ARC-21 token **+** a sealed `Paystub` credential, bound to the same amount | Public sees *nothing* — no amounts, no recipient identity |
+| **Pay** | Atomic transition: private `transfer_private` of a real token (ARC-21, or an ARC-22 stablecoin like USDCx) **+** a sealed `Paystub` credential, bound to the same amount | Public sees *nothing* — no amounts, no recipient identity |
 | **Prove** | Employee runs `prove_income(paystub, threshold)` | Verifier learns a **tier** (A/B/C/below) for their threshold, plus the issuing employer & token — **never the amount** |
 | **Disclose** | Employee runs `disclose(paystub)` on one payslip | Exact amount + period go public, provably signed by a real employer — a deliberate, per-record, irreversible act |
 
@@ -16,11 +16,21 @@ Salaries themselves are configured as **employer-owned encrypted records** (`sea
 
 | Program | Purpose |
 |---|---|
-| [`sealary_payroll_v2.aleo`](https://testnet.explorer.provable.com/program/sealary_payroll_v2.aleo) | `pay` · `pay_batch` (4 per tx) · `prove_income` (verifier + nonce bound) · `disclose` · `tier` |
+| [`sealary_payroll_v2.aleo`](https://testnet.explorer.provable.com/program/sealary_payroll_v2.aleo) | ARC-21 payroll: `pay` · `pay_batch` (4 per tx) · `prove_income` (verifier + nonce bound) · `disclose` · `tier` |
+| [`sealary_pay_arc22.aleo`](https://testnet.explorer.provable.com/program/sealary_pay_arc22.aleo) | ARC-22 payroll via **dynamic dispatch** — same four transitions, any compliant stablecoin (USDCx family) |
 | [`sealary_conf.aleo`](https://testnet.explorer.provable.com/program/sealary_conf.aleo) | `set_salary` · `update_salary` · `set_salary_batch` (8 per tx) |
 | [`token_registry.aleo`](https://testnet.explorer.provable.com/program/token_registry.aleo) | ARC-21 value layer — test stablecoin **zUSD** (`token_id = 7777field`, 6 decimals) |
 
 `pay_batch` paying 4 employees in a single transaction has been executed end-to-end on testnet (fee ≈ 0.024 credits).
+
+### Any token, one contract each way
+
+Aleo has two token worlds, and payroll should not care which one a company banks in:
+
+- **ARC-21 registry tokens** (zUSD, bridged vUSDC/vETH) — `sealary_payroll_v2.aleo` imports `token_registry.aleo` statically and pays by `token_id`.
+- **ARC-22 compliant stablecoins** (Circle's **USDCx**, USAD) — each is its own program with a freeze list, so there is nothing to import statically. `sealary_pay_arc22.aleo` calls them by **runtime program id** (`ARC22@(token_prog)::transfer_private`, Leo 4.4 / ARC-0009), which means *one* deployed contract covers the whole family — no redeploy per token. The employer's freeze-list non-membership proof is built in the browser (Provable SDK), so the paying address is never sent to an API; a batch reuses one proof across all four transfers.
+
+Both mint the same `Paystub` credential in the same atomic transition, so proofs, disclosure and the verifier page work identically whichever token an organization runs on.
 
 ## Why Aleo
 
@@ -35,13 +45,13 @@ What we trade away: no streaming/continuous accrual (UTXO model) — we batch pe
 ## Architecture
 
 ```
-┌────────────── React + Vite (SPA) ───────────────┐
-│  /employer      /employee      /verify   /setup │
-└──┬────────────────────────────────────────┬─────┘
-   │ HTTPS — identity only (PII, roster)    │ wallet-adapter — money & proofs
-┌──▼─────────────────────────────┐  ┌───────▼───────────────────────────┐
+┌───────────────── React + Vite (SPA) ─────────────────┐
+│ /employer  /employer/:id  /employee  /verify  /setup │
+└──┬─────────────────────────────────────────────┬─────┘
+   │ HTTPS — identity only (PII, roster)         │ wallet-adapter — money & proofs
+┌──▼─────────────────────────────┐  ┌────────────▼──────────────────────┐
 │ Vercel Functions + Neon (EU)   │  │ Aleo Testnet                      │
-│ · Sign-in with Aleo (SIWA)     │  │ · token_registry Token (private)  │
+│ · Sign-in with Aleo (SIWA)     │  │ · ARC-21 / ARC-22 Token (private) │
 │ · AES-256-GCM PII, per-person  │  │ · Paystub records (credential)    │
 │   DEK + crypto-shredding       │  │ · SalaryConfig records (employer) │
 │ · append-only audit log        │  │ · ZK proofs verified on-chain     │
@@ -56,6 +66,7 @@ What we trade away: no streaming/continuous accrual (UTXO model) — we batch pe
 ```
 contract/
   sealary/        # sealary_payroll_v2.aleo — pay / prove / disclose (+ tests, bootstrap.sh, verify_tier.sh)
+  sealary_arc22/  # sealary_pay_arc22.aleo — same, for ARC-22 stablecoins via dynamic dispatch
   sealary_conf/   # sealary_conf.aleo — encrypted salary configs
   spike/          # minimal cross-program transfer_private feasibility spike
 frontend/
@@ -66,7 +77,7 @@ frontend/
 
 ## Quickstart
 
-**Prerequisites**: Node ≥ 20 · Leo ≥ 4.2 (`cargo install leo-lang`, rustc ≥ 1.96) · [Shield wallet](https://shield.aleo.org) on Testnet with faucet credits · a Neon Postgres database.
+**Prerequisites**: Node ≥ 20 · Leo ≥ 4.2, or **≥ 4.4 for `sealary_arc22/`** (dynamic dispatch) · [Shield wallet](https://shield.aleo.org) on Testnet with faucet credits · a Neon Postgres database.
 
 ### Contracts
 
@@ -95,7 +106,7 @@ Production deploys as a single Vercel project (`api/*.ts` become serverless func
 
 ## Demo walkthrough (three roles)
 
-1. **Employer** — connect Shield → `/setup`: create the org against your `token_id` → add employees (name goes to the backend encrypted; **salary is sealed on-chain**, one wallet approval) or import a `name,address,salary` CSV (salaries batch-sealed 8 per tx) → **Pay batch**: one approval pays up to 4 employees privately and mints their Paystubs.
+1. **Employer** — connect Shield → `/setup`: create an org against a registry `token_id` or an ARC-22 stablecoin program (one wallet can run several orgs, one token each; `/employer` lists them) → add employees (name goes to the backend encrypted; **salary is sealed on-chain**, one wallet approval) or import a `name,address,salary` CSV (salaries batch-sealed 8 per tx) → **Pay batch**: one approval pays up to 4 employees privately and mints their Paystubs.
 2. **Employee** — connect → decrypt payslips with your view key → drag the threshold slider → **Generate proof** → send the tx id to whoever asked. Or **Disclose** one payslip (with the recipient noted in your personal disclosure log). Export payslips as CSV / print as PDF.
 3. **Verifier** — paste the tx id at `/verify` → see the tier, issuing employer and token. The amount never crossed the wire.
 
@@ -119,11 +130,13 @@ Extras worth showing: one-off **bonus** payments that don't disturb the monthly 
 - `disclose` is **irreversible**: the amount lands on a public chain forever (the UI says so). The public sees amount + employer, but not the employee's address — only the holder of the tx id can link it to a person.
 - Transaction **metadata** (call counts and timing of `pay`) is visible even though amounts are not; mitigations (padding, batching windows) are on the roadmap.
 - Employer-side payment history shows amounts from the *current* `SalaryConfig` (the chain encrypts historical amounts to the employee, not the employer); a raise rewrites displayed history. Fix (employer-owned `PayrollReceipt` snapshot record) is designed, not deployed.
-- `prove_income` is not yet bound to a verifier nonce, so a proof tx could in theory be replayed by someone it wasn't issued to. Low impact for income proofs; the fix (public `verifier` + `nonce` inputs) needs a contract redeploy.
+- The **ARC-22 path is deployed and wired, not yet exercised with real value**: `sealary_pay_arc22.aleo` is live on testnet (dynamic-dispatch deployment accepted by consensus) and the freeze-list proof is built against the live `test_usdcx_freezelist.aleo` tree, but no USDCx pay has been run end-to-end — that also leaves the wallet's ability to prove a `call.dynamic` execution unverified. The ARC-21 path is the one demoed.
+- ARC-22 is still a **Draft** standard; `sealary_pay_arc22.aleo` targets the interface as deployed by USDCx today, and a signature change in the final ARC would need a redeploy.
+- USDCx-family transfers emit a `ComplianceRecord` to the issuer's compliance address by design — private to the public, readable by the regulator. That is the point of a compliant stablecoin, but it is a weaker privacy guarantee than an ARC-21 token, where only the two parties can read the transfer.
 
 ## Roadmap
 
-Multi-period aggregated proofs · verifier-bound proofs · employer `PayrollReceipt` snapshots · mainnet USDCx as the value layer · KMS + key rotation · Playwright E2E.
+Multi-period aggregated proofs · employer `PayrollReceipt` snapshots · mainnet USDCx as the value layer · a generic ARC-20 variant (same dispatch trick, third token family) · KMS + key rotation · Playwright E2E.
 
 ---
 

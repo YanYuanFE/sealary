@@ -4,7 +4,7 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { PageHeader } from '@/components/PageHeader'
-import { PAY_BATCH, SALARY_BATCH, HR_PROGRAM, PROGRAM } from '@/lib/aleo'
+import { PAY_BATCH, SALARY_BATCH, HR_PROGRAM, PROGRAM, ARC22_PROGRAM } from '@/lib/aleo'
 
 // 三角色操作指南。数字（批次大小、程序名）从 lib/aleo 取，改常量时文档跟着变，不会写死过期。
 export function Docs() {
@@ -21,8 +21,9 @@ export function Docs() {
         <Steps>
           <Step n={1} title="Install Shield">
             Get the <A href="https://shield.aleo.org">Shield wallet</A> and switch the network to <Code>Testnet</Code>.
-            Sealary asks for decrypt permission on <Code>{PROGRAM}</Code>, <Code>{HR_PROGRAM}</Code> and{' '}
-            <Code>token_registry.aleo</Code> — that permission is what lets your own records be read locally.
+            Sealary asks for decrypt permission on its own programs (<Code>{PROGRAM}</Code>, <Code>{HR_PROGRAM}</Code>,{' '}
+            <Code>{ARC22_PROGRAM}</Code>) and on the token programs it pays from — that permission is what lets your
+            own records be read locally.
           </Step>
           <Step n={2} title="Fund it with testnet credits">
             Every on-chain action costs a fee in <strong>Aleo credits</strong> — separate from your payroll token.
@@ -43,10 +44,14 @@ export function Docs() {
       <Section icon={<Building2 className="size-5 text-seal" />} title="For employers" anchor="employers">
         <Steps>
           <Step n={1} title="Create your organization">
-            Go to <Nav to="/setup">Setup</Nav>. You need a payroll token that already exists on-chain — its{' '}
-            <Code>token_id</Code> (a <Code>…field</Code> value from <Code>token_registry.aleo</Code>). The demo uses
-            zUSD, <Code>7777field</Code>, 6 decimals, issued by <Code>contract/sealary/bootstrap.sh</Code>.
-            Paste the id and Sealary reads the symbol and decimals off-chain to confirm you picked the right one.
+            Go to <Nav to="/setup">Setup</Nav> and pick what payroll runs on. <strong>Registry token</strong> — anything
+            registered in <Code>token_registry.aleo</Code>, referenced by its <Code>token_id</Code> (a{' '}
+            <Code>…field</Code> value); the demo uses zUSD, <Code>7777field</Code>, 6 decimals, issued by{' '}
+            <Code>contract/sealary/bootstrap.sh</Code>. <strong>Compliant stablecoin</strong> — an ARC-22 program such as{' '}
+            <Code>test_usdcx_stablecoin.aleo</Code> (Circle's USDCx), referenced by program name; Sealary pays it through
+            dynamic dispatch and builds the freeze-list proof locally, so your address never leaves the browser.
+            <br />
+            Either way Sealary reads the symbol and decimals off-chain to confirm you picked the right one.
             Pick a <strong>pay day</strong> (1–28) — the console counts down to it.
           </Step>
           <Step n={2} title="Add employees">
@@ -80,6 +85,11 @@ export function Docs() {
             the rows above it — strip that line, hash the rest, compare, and you know the file wasn't edited.
           </Step>
         </Steps>
+        <Note>
+          One wallet can run <strong>several organizations</strong> — <Nav to="/employer">Employer</Nav> lists them all,
+          each with its own console, roster and payroll history. Each one needs its own token: on-chain records carry
+          the token, and that's what keeps one organization's payroll from mixing with another's.
+        </Note>
       </Section>
 
       <Section icon={<KeyRound className="size-5 text-seal" />} title="For employees" anchor="employees">
