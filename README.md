@@ -32,6 +32,8 @@ Aleo has two token worlds, and payroll should not care which one a company banks
 
 Both mint the same `Paystub` credential in the same atomic transition, so proofs, disclosure and the verifier page work identically whichever token an organization runs on.
 
+**Executed on testnet**: [`at1sk2g36…qvcqmwl`](https://testnet.explorer.provable.com/transaction/at1sk2g360f0ezmwecqrprm98dysdc9z7t96phwajy7rx7msqua9ygqvcqmwl) — one USDCx payroll run, 5 transitions (4 dynamically dispatched `transfer_private` + `pay_batch`), 4 employees paid and 4 sealed Paystubs minted, every input a ciphertext and no amount in public state. Fee ≈ 0.095 credits — ~4× the ARC-21 run, the cost of USDCx's in-circuit freeze-list proof.
+
 ## Why Aleo
 
 Sealary uses Aleo's private record model to keep payroll data confidential while still producing verifiable income claims:
@@ -130,7 +132,7 @@ Extras worth showing: one-off **bonus** payments that don't disturb the monthly 
 - `disclose` is **irreversible**: the amount lands on a public chain forever (the UI says so). The public sees amount + employer, but not the employee's address — only the holder of the tx id can link it to a person.
 - Transaction **metadata** (call counts and timing of `pay`) is visible even though amounts are not; mitigations (padding, batching windows) are on the roadmap.
 - Employer-side payment history shows amounts from the *current* `SalaryConfig` (the chain encrypts historical amounts to the employee, not the employer); a raise rewrites displayed history. Fix (employer-owned `PayrollReceipt` snapshot record) is designed, not deployed.
-- The **ARC-22 path is deployed and wired, not yet exercised with real value**: `sealary_pay_arc22.aleo` is live on testnet (dynamic-dispatch deployment accepted by consensus) and the freeze-list proof is built against the live `test_usdcx_freezelist.aleo` tree, but no USDCx pay has been run end-to-end — that also leaves the wallet's ability to prove a `call.dynamic` execution unverified. The ARC-21 path is the one demoed.
+- On the ARC-22 path, `pay`/`pay_batch` are proven end-to-end on testnet, but `prove_income` and `disclose` **have not been exercised against an ARC-22 `Paystub`** — the transitions are byte-identical in logic to the ARC-21 ones that have been, and the record layout is the same, but the tx receipts are on the ARC-21 program.
 - ARC-22 is still a **Draft** standard; `sealary_pay_arc22.aleo` targets the interface as deployed by USDCx today, and a signature change in the final ARC would need a redeploy.
 - USDCx-family transfers emit a `ComplianceRecord` to the issuer's compliance address by design — private to the public, readable by the regulator. That is the point of a compliant stablecoin, but it is a weaker privacy guarantee than an ARC-21 token, where only the two parties can read the transfer.
 
