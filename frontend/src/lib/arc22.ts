@@ -72,6 +72,8 @@ export async function freezeProofs(tokenProgram: string, sender: string): Promis
 }
 
 // pay(token_prog, input: dyn record, to, amount, period, proofs)
+// imports：动态分发的被调程序只在运行时才知道，钱包无从从部署里推断——不声明它就拿不到
+// 代币程序的 stack，授权阶段直接失败（"External stack for '…' does not exist"）。
 export function payArc22Opts(
   tokenProgram: string, tokenUid: string, to: string, amount: bigint, period: number, proofs: string,
 ): TransactionOptions {
@@ -86,6 +88,7 @@ export function payArc22Opts(
       `${period}u32`,
       proofs,
     ],
+    imports: [tokenProgram],
     fee: FEE,
   }
 }
@@ -105,6 +108,7 @@ export function payBatchArc22Opts(
       `${period}u32`,
       proofs,
     ],
+    imports: [tokenProgram],
     fee: FEE,
   }
 }
