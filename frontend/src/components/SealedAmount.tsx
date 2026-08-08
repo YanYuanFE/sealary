@@ -15,13 +15,13 @@ export function SealedAmount({
   revealed,
   size = 'md',
   className,
-  token = 'zUSD',
+  token, // 必填：默认成某个币名会把别的币标错（USDCx 曾被显示为 zUSD）
 }: {
   amount: number
   revealed: boolean
   size?: Size
   className?: string
-  token?: string
+  token: string
 }) {
   return (
     <span className={cn('tabular inline-flex items-baseline gap-2 font-mono', sizes[size], className)}>

@@ -142,7 +142,8 @@ export function Employee() {
           <GasBanner />
           <div className="grid gap-6 lg:grid-cols-[1fr_1.2fr]">
             <IdentityCard address={address!} name={identity?.person.name}
-              employer={identity?.company.name} latest={stubs[0]} decimals={metaOf(stubs[0]).decimals} />
+              employer={identity?.company.name} latest={stubs[0]}
+              decimals={metaOf(stubs[0]).decimals} symbol={metaOf(stubs[0]).symbol} />
             <ProvePanel latest={stubs[0]} decimals={metaOf(stubs[0]).decimals} symbol={metaOf(stubs[0]).symbol} onLogged={refreshLog} hasGas={hasGas}
               wallet={{ connected, address, requestRecords, executeTransaction, transactionStatus }} />
           </div>
@@ -213,8 +214,8 @@ function Locked({ loading, onUnlock }: { loading: boolean; onUnlock: () => void 
   )
 }
 
-function IdentityCard({ address, name, employer, latest, decimals }: {
-  address: string; name?: string; employer?: string; latest?: Stub; decimals: number
+function IdentityCard({ address, name, employer, latest, decimals, symbol }: {
+  address: string; name?: string; employer?: string; latest?: Stub; decimals: number; symbol: string
 }) {
   return (
     <Card className="gap-0 p-6">
@@ -227,7 +228,7 @@ function IdentityCard({ address, name, employer, latest, decimals }: {
       </div>
       <div className="mt-6 space-y-3 border-t border-border/70 pt-5 text-sm">
         <Line k="Address" v={shortAddr(address)} />
-        <Line k="Latest salary" v={latest ? <SealedAmount amount={fromBase(latest.amount, decimals)} revealed size="sm" /> : '—'} />
+        <Line k="Latest salary" v={latest ? <SealedAmount amount={fromBase(latest.amount, decimals)} revealed size="sm" token={symbol} /> : '—'} />
         <Line k="Employer" v={employer ?? (latest?.employer ? shortAddr(latest.employer) : '—')} />
       </div>
     </Card>
@@ -416,7 +417,7 @@ function Payslips({ stubs, metaOf, wallet, employeeName, employerName, onLogged,
               <tr key={s.uid} className="border-b border-border/50 last:border-0 hover:bg-secondary/40">
                 <td className="px-5 py-3.5 font-medium">{period(s.period)}</td>
                 <td className="px-5 py-3.5 font-mono text-xs text-muted-foreground">{metaOf(s).symbol} · {shortAddr(s.tokenId, 4, 4)}</td>
-                <td className="px-5 py-3.5 text-right"><SealedAmount amount={fromBase(s.amount, metaOf(s).decimals)} revealed size="sm" /></td>
+                <td className="px-5 py-3.5 text-right"><SealedAmount amount={fromBase(s.amount, metaOf(s).decimals)} revealed size="sm" token={metaOf(s).symbol} /></td>
                 <td className="px-5 py-3.5">
                   <div className="flex justify-end gap-2">
                     <Button variant="ghost" size="sm" onClick={() => printStub(s)} title="Print payslip (save as PDF)">

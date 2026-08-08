@@ -99,7 +99,7 @@ export function Home() {
                 <div className="px-6 py-7">
                   <p className="font-mono text-xs tracking-wide text-muted-foreground uppercase">Monthly salary</p>
                   <div className="mt-3 flex min-h-14 items-center">
-                    <SealedAmount amount={DEMO_AMOUNT} revealed={revealed} size="lg" />
+                    <SealedAmount amount={DEMO_AMOUNT} revealed={revealed} size="lg" token="zUSD" />
                   </div>
                   <div className="mt-6 grid gap-3 font-mono text-xs text-muted-foreground sm:grid-cols-2">
                     <span>owner {shortAddr('aleo1z62rhxmej9ldd9hf76xa6r5p2dm4fgvsxv90p728mrgzm4ywz5fqezlww8')}</span>
@@ -652,7 +652,7 @@ function SealedArtifact() {
         <div className="px-5 py-6">
           <p className="font-mono text-xs tracking-wide text-muted-foreground uppercase">Sealed net pay</p>
           <div className="mt-3">
-            <SealedAmount amount={DEMO_AMOUNT} revealed={false} size="md" />
+            <SealedAmount amount={DEMO_AMOUNT} revealed={false} size="md" token="zUSD" />
           </div>
           <div className="mt-5 grid grid-cols-3 gap-2 font-mono text-[0.7rem] text-muted-foreground">
             <span>token zUSD</span>
@@ -681,7 +681,7 @@ function ProofArtifact() {
           <div className="rounded-lg border border-border bg-secondary/40 p-4">
             <p className="font-mono text-xs tracking-wide text-muted-foreground uppercase">Amount</p>
             <div className="mt-2">
-              <SealedAmount amount={DEMO_AMOUNT} revealed={false} size="sm" />
+              <SealedAmount amount={DEMO_AMOUNT} revealed={false} size="sm" token="zUSD" />
             </div>
           </div>
           <div className="grid grid-cols-3 gap-2">
