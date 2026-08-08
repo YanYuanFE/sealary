@@ -90,6 +90,11 @@ const hasTokenId = (recordJson: string, tokenId: string) => new RegExp(`token_id
 const payProgramOf = (c: Company) => (c.tokenFamily === 'arc22' ? c.tokenProgram! : 'token_registry.aleo')
 const matchesCompany = (c: Company, recordJson: string) => c.tokenFamily === 'arc22' || hasTokenId(recordJson, c.tokenId)
 
+// 已提交、尚未落链的交易占用的 Token record。钱包会锁住它们，但 requestRecords 仍报 unspent
+// （链上还没记录这笔花费），选中就会在授权阶段撞上 "Record is already reserved by another
+// transaction"。交易落定后（accepted 或 rejected）移出。
+const inFlightUids = new Set<string>()
+
 // 选发薪 Token record：属于本组织代币且余额 ≥ 本批总额的最大一张。
 // 不能拿 recs[0]：pay_batch 补位会给雇主自己留 0 额找零 record，选中它整批 underflow。
 async function pickTokenUid(requestRecords: Wallet['requestRecords'], company: Company, need: bigint): Promise<string | undefined> {
@@ -99,12 +104,18 @@ async function pickTokenUid(requestRecords: Wallet['requestRecords'], company: C
     const s = JSON.stringify(r)
     const uid = (r as { uid?: string })?.uid
     const amt = s.match(/amount:\s*(\d+)u128/)?.[1]
-    if (!uid || !amt || !matchesCompany(company, s)) continue
+    if (!uid || !amt || inFlightUids.has(uid) || !matchesCompany(company, s)) continue
     const amount = BigInt(amt)
     if (amount >= need && (!best || amount > best.amount)) best = { uid, amount }
   }
   return best?.uid
 }
+
+// 选不到 record 时的提示：有在途交易就是它占着，别让用户以为余额不够。
+const noRecordHint = (symbol: string) =>
+  inFlightUids.size > 0
+    ? 'A previous payment is still settling and holds the funds — wait for it to land, then try again.'
+    : `Need a single unspent ${symbol} record ≥ the amount — mint or consolidate first.`
 
 async function fetchBalance(requestRecords: Wallet['requestRecords'], company: Company): Promise<number | null> {
   try {
@@ -421,13 +432,17 @@ function Console({ company, address, executeTransaction, requestRecords, transac
   // 单笔临时付款（bonus/追溯/合同款）：走单笔 pay，kind=bonus 不占 Paid 徽章，同期可加发。
   async function payBonus(person: Person, amountHuman: number) {
     setBusy(true)
+    let held: string | undefined // 本次占用的 Token record，落定后释放
+    let stillPending = false     // 超时未落链：record 仍被钱包锁着，不能释放
     try {
       const amt = toBase(amountHuman, company.decimals)
       const uid = await pickTokenUid(requestRecords, company, amt)
       if (!uid) {
-        toast.error('No Token record covers this amount', { description: `Need a single unspent ${company.symbol} record ≥ the amount — mint or consolidate first.` })
+        toast.error('No Token record covers this amount', { description: noRecordHint(company.symbol) })
         return
       }
+      inFlightUids.add(uid)
+      held = uid
       // ARC-22：付款人（雇主）要附冻结名单非成员证明——本地算，地址不出机器。
       const opts = company.tokenFamily === 'arc22'
         ? payArc22Opts(company.tokenProgram!, uid, person.walletAddress, amt, CURRENT_PERIOD, await freezeProofs(company.tokenProgram!, address))
@@ -441,6 +456,7 @@ function Console({ company, address, executeTransaction, requestRecords, transac
       const toastId = toast.loading(`Confirming bonus → ${person.name}…`)
       const fin = await waitForTx(transactionStatus, tempId)
       if (fin.status === 'pending') {
+        stillPending = true
         toast.warning('Still pending — not recorded', { id: toastId, description: 'Wait for it to settle and refresh before retrying, or you may pay twice.' })
         return
       }
@@ -455,6 +471,7 @@ function Console({ company, address, executeTransaction, requestRecords, transac
     } catch (e) {
       toast.error('Bonus failed', { description: String((e as Error)?.message ?? e) })
     } finally {
+      if (held && !stillPending) inFlightUids.delete(held)
       setBusy(false)
     }
   }
@@ -467,6 +484,8 @@ function Console({ company, address, executeTransaction, requestRecords, transac
       return
     }
     setBusy(true)
+    let held: string | undefined
+    let stillPending = false
     try {
       // 补位到 4：多余槽用雇主自己地址 + amount 0（雇主拿到 0 额 Paystub，无害；不污染员工）。
       const tos = Array.from({ length: PAY_BATCH }, (_, i) => targets[i]?.walletAddress ?? address)
@@ -474,9 +493,11 @@ function Console({ company, address, executeTransaction, requestRecords, transac
       const need = amounts.reduce((s, a) => s + a, 0n)
       const uid = await pickTokenUid(requestRecords, company, need)
       if (!uid) {
-        toast.error('No Token record covers this batch', { description: `Need a single unspent ${company.symbol} record ≥ the batch total — mint or consolidate first.` })
+        toast.error('No Token record covers this batch', { description: noRecordHint(company.symbol) })
         return
       }
+      inFlightUids.add(uid)
+      held = uid
       // ARC-22：付款人固定是雇主，一份冻结名单证明 4 笔链式转账复用。
       const opts = company.tokenFamily === 'arc22'
         ? payBatchArc22Opts(company.tokenProgram!, uid, tos, amounts, CURRENT_PERIOD, await freezeProofs(company.tokenProgram!, address))
@@ -492,6 +513,7 @@ function Console({ company, address, executeTransaction, requestRecords, transac
       const toastId = toast.loading(`Confirming on-chain — ${targets.length} employee${targets.length > 1 ? 's' : ''}…`)
       const fin = await waitForTx(transactionStatus, tempId)
       if (fin.status === 'pending') {
+        stillPending = true
         toast.warning('Still pending — not recorded as paid', {
           id: toastId,
           description: 'Wait for it to settle and refresh before re-running, or you may pay this batch twice.',
@@ -521,6 +543,7 @@ function Console({ company, address, executeTransaction, requestRecords, transac
     } catch (e) {
       toast.error('Pay failed', { description: String((e as Error)?.message ?? e) })
     } finally {
+      if (held && !stillPending) inFlightUids.delete(held)
       setBusy(false)
     }
   }
